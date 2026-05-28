@@ -50,7 +50,7 @@ def get_top_prices():
                 "volume": d["total_volume"],
             })
         return result
-    except Exception as e:
+    except:
         return []
 
 def get_kline(coin_id, days=1):
@@ -61,8 +61,8 @@ def get_kline(coin_id, days=1):
         )
         data = res.json()
         prices = data.get("prices", [])
-        step = max(1, len(prices) // 48)
-        sampled = prices[::step][-48:]
+        step = max(1, len(prices) // 72)
+        sampled = prices[::step][-72:]
         labels = []
         vals = []
         for p in sampled:
@@ -83,47 +83,66 @@ HTML = """<!DOCTYPE html>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f0f2f5; color: #1a1a2e; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-.header { background: white; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; flex-shrink: 0; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
-.logo { color: #F7931A; font-weight: 700; font-size: 17px; }
-.live { color: #4caf50; font-size: 11px; background: #f0fff4; padding: 3px 8px; border-radius: 10px; border: 1px solid #c6f6d5; }
-.content { flex: 1; overflow-y: auto; padding: 12px 16px; }
-.top-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
-.price-card { background: white; border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; border: 1.5px solid #eee; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
-.price-card:hover { border-color: #F7931A88; transform: translateY(-1px); }
-.card-sym { color: #999; font-size: 10px; margin-bottom: 4px; font-weight: 500; }
-.card-price { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
-.card-change { font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 6px; display: inline-block; }
+
+.header { background: white; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; flex-shrink: 0; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.logo { color: #F7931A; font-weight: 700; font-size: 18px; }
+.live { color: #4caf50; font-size: 11px; background: #f0fff4; padding: 3px 10px; border-radius: 10px; border: 1px solid #c6f6d5; }
+
+.content { flex: 1; overflow-y: auto; padding: 16px 24px; }
+
+.top-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; max-width: 600px; }
+.price-card { background: white; border-radius: 14px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.2s; border: 1.5px solid #eee; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+.price-card:hover { border-color: #F7931A88; transform: translateY(-2px); box-shadow: 0 4px 12px rgba(247,147,26,0.15); }
+.card-sym { color: #999; font-size: 10px; margin-bottom: 6px; font-weight: 600; letter-spacing: 1px; }
+.card-price { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+.card-change { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; display: inline-block; }
 .up { color: #16a34a; background: #f0fdf4; }
 .down { color: #dc2626; background: #fef2f2; }
-.chat-area { display: flex; flex-direction: column; gap: 12px; }
-.msg-row { display: flex; gap: 8px; align-items: flex-start; }
+
+.chat-area { display: flex; flex-direction: column; gap: 16px; }
+
+.msg-row { display: flex; gap: 10px; align-items: flex-start; width: 100%; }
 .msg-row.user { flex-direction: row-reverse; }
-.av { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; font-weight: 700; }
+.av { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; font-weight: 700; }
 .ai-av { background: linear-gradient(135deg, #F7931A, #FFD700); color: white; }
 .u-av { background: #e8eaf6; color: #5c6bc0; }
-.bubble { max-width: 82%; padding: 10px 14px; border-radius: 16px; font-size: 13px; line-height: 1.7; }
+
+.bubble { max-width: 600px; padding: 12px 16px; border-radius: 16px; font-size: 13px; line-height: 1.7; }
 .ai-b { background: white; color: #333; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); border: 1px solid #f0f0f0; }
 .u-b { background: linear-gradient(135deg, #F7931A, #FFB347); color: white; border-bottom-right-radius: 4px; }
-.chart-box { background: white; border-radius: 14px; padding: 14px; max-width: 95%; box-shadow: 0 1px 6px rgba(0,0,0,0.08); border: 1px solid #f0f0f0; }
-.chart-title { color: #666; font-size: 11px; font-weight: 600; margin-bottom: 10px; text-transform: uppercase; }
-.chart-wrap { position: relative; height: 150px; }
-.chart-sum { color: #999; font-size: 11px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #f5f5f5; }
-.dtable { width: 100%; border-collapse: collapse; font-size: 12px; }
-.dtable th { color: #999; font-weight: 500; padding: 4px 8px; text-align: right; font-size: 11px; }
+
+.chart-box { background: white; border-radius: 16px; padding: 20px; width: 100%; max-width: 700px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #f0f0f0; }
+.chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.chart-title { color: #333; font-size: 14px; font-weight: 700; }
+.chart-badge { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 8px; }
+.chart-wrap { position: relative; height: 220px; }
+.chart-sum { color: #999; font-size: 11px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f5f5f5; display: flex; gap: 16px; }
+.chart-sum span { display: flex; gap: 4px; align-items: center; }
+
+.table-box { background: white; border-radius: 16px; padding: 20px; width: 100%; max-width: 700px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #f0f0f0; }
+.table-header { color: #333; font-size: 14px; font-weight: 700; margin-bottom: 14px; }
+.dtable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dtable th { color: #aaa; font-weight: 500; padding: 6px 10px; text-align: right; font-size: 11px; border-bottom: 1px solid #f5f5f5; }
 .dtable th:first-child { text-align: left; }
-.dtable td { padding: 8px 8px; border-top: 1px solid #f5f5f5; text-align: right; color: #333; }
-.dtable td:first-child { text-align: left; color: #666; font-weight: 500; }
-.input-area { background: white; padding: 10px 14px; border-top: 1px solid #eee; flex-shrink: 0; }
-.chips { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 8px; scrollbar-width: none; }
+.dtable td { padding: 10px 10px; border-top: 1px solid #f9f9f9; text-align: right; color: #333; }
+.dtable td:first-child { text-align: left; }
+.dtable tr:hover td { background: #fafafa; }
+.coin-name { font-weight: 600; color: #222; }
+.coin-sub { color: #bbb; font-size: 11px; }
+
+.input-area { background: white; padding: 12px 24px; border-top: 1px solid #eee; flex-shrink: 0; box-shadow: 0 -1px 4px rgba(0,0,0,0.04); }
+.chips { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 10px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
-.chip { background: #f8f9fa; border: 1px solid #eee; color: #666; border-radius: 14px; padding: 5px 12px; font-size: 11px; cursor: pointer; white-space: nowrap; transition: all 0.2s; }
+.chip { background: #f8f9fa; border: 1px solid #eee; color: #666; border-radius: 16px; padding: 6px 14px; font-size: 12px; cursor: pointer; white-space: nowrap; transition: all 0.2s; }
 .chip:hover { background: #fff3e0; border-color: #F7931A; color: #F7931A; }
 .chip:disabled { opacity: 0.4; cursor: not-allowed; }
-.irow { display: flex; gap: 8px; align-items: center; }
-.irow input { flex: 1; background: #f8f9fa; border: 1.5px solid #eee; border-radius: 22px; padding: 9px 16px; font-size: 13px; color: #333; outline: none; }
-.irow input:focus { border-color: #F7931A88; background: white; }
-.sbtn { background: linear-gradient(135deg, #F7931A, #FFB347); border: none; border-radius: 50%; width: 38px; height: 38px; color: white; font-size: 16px; cursor: pointer; flex-shrink: 0; }
-.sbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.irow { display: flex; gap: 10px; align-items: center; max-width: 700px; }
+.irow input { flex: 1; background: #f8f9fa; border: 1.5px solid #eee; border-radius: 24px; padding: 10px 18px; font-size: 13px; color: #333; outline: none; transition: all 0.2s; }
+.irow input:focus { border-color: #F7931A88; background: white; box-shadow: 0 0 0 3px rgba(247,147,26,0.08); }
+.sbtn { background: linear-gradient(135deg, #F7931A, #FFB347); border: none; border-radius: 50%; width: 42px; height: 42px; color: white; font-size: 18px; cursor: pointer; flex-shrink: 0; box-shadow: 0 2px 8px rgba(247,147,26,0.4); transition: all 0.2s; }
+.sbtn:hover:not(:disabled) { transform: scale(1.05); }
+.sbtn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
 .dots span { display: inline-block; width: 6px; height: 6px; background: #F7931A; border-radius: 50%; animation: bonce 1.2s infinite; margin: 0 2px; }
 .dots span:nth-child(2) { animation-delay: 0.2s; }
 .dots span:nth-child(3) { animation-delay: 0.4s; }
@@ -131,28 +150,31 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #
 </style>
 </head>
 <body>
+
 <div class="header">
-  <div class="logo">B CryptoVision</div>
-  <div class="live">live</div>
+  <div class="logo">&#8383; CryptoVision</div>
+  <div class="live">&#9679; Live</div>
 </div>
+
 <div class="content" id="content">
   <div class="top-cards">
-    <div class="price-card" id="card-btc" onclick="doSend('BTC chart')">
+    <div class="price-card" onclick="doSend('BTC chart')">
       <div class="card-sym">BITCOIN</div>
       <div class="card-price" style="color:#F7931A" id="p-btc">...</div>
       <div class="card-change" id="c-btc">--</div>
     </div>
-    <div class="price-card" id="card-eth" onclick="doSend('ETH chart')">
+    <div class="price-card" onclick="doSend('ETH chart')">
       <div class="card-sym">ETHEREUM</div>
       <div class="card-price" style="color:#627EEA" id="p-eth">...</div>
       <div class="card-change" id="c-eth">--</div>
     </div>
-    <div class="price-card" id="card-sol" onclick="doSend('SOL chart')">
+    <div class="price-card" onclick="doSend('SOL chart')">
       <div class="card-sym">SOLANA</div>
       <div class="card-price" style="color:#9945FF" id="p-sol">...</div>
       <div class="card-change" id="c-sol">--</div>
     </div>
   </div>
+
   <div class="chat-area" id="chatArea">
     <div class="msg-row">
       <div class="av ai-av">AI</div>
@@ -160,19 +182,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #
     </div>
   </div>
 </div>
+
 <div class="input-area">
   <div class="chips">
-    <button class="chip" onclick="doSend('BTC chart')">BTC Chart</button>
-    <button class="chip" onclick="doSend('ETH chart')">ETH Chart</button>
-    <button class="chip" onclick="doSend('market overview')">Market</button>
-    <button class="chip" onclick="doSend('SOL chart')">SOL Chart</button>
-    <button class="chip" onclick="doSend('top coins')">Top Coins</button>
+    <button class="chip" onclick="doSend('BTC chart')">&#128200; BTC Chart</button>
+    <button class="chip" onclick="doSend('ETH chart')">&#128201; ETH Chart</button>
+    <button class="chip" onclick="doSend('market overview')">&#128293; Market</button>
+    <button class="chip" onclick="doSend('SOL chart')">&#9900; SOL Chart</button>
+    <button class="chip" onclick="doSend('top coins')">&#127942; Top Coins</button>
   </div>
   <div class="irow">
     <input type="text" id="inp" placeholder="Ask me anything about crypto..." />
     <button class="sbtn" id="sbtn" onclick="doSend()">&#9658;</button>
   </div>
 </div>
+
 <script>
 var chatHistory = [];
 var busy = false;
@@ -252,7 +276,7 @@ function addAIMsg(text) {
   var area = document.getElementById('chatArea');
   var d = document.createElement('div');
   d.className = 'msg-row';
-  d.innerHTML = '<div class="av ai-av">AI</div><div class="bubble ai-b">' + text.replace(/\\n/g,'<br>') + '</div>';
+  d.innerHTML = '<div class="av ai-av">AI</div><div class="bubble ai-b">' + text.replace(/\n/g,'<br>') + '</div>';
   area.appendChild(d);
   scrollDown();
 }
@@ -270,22 +294,60 @@ function addTyping() {
 function addChart(data) {
   var area = document.getElementById('chatArea');
   var id = 'ch' + Date.now();
+  var prices = data.prices;
+  var up = prices[prices.length-1] >= prices[0];
+  var color = up ? '#16a34a' : '#dc2626';
+  var badge = up ? '<span class="chart-badge up">+' + data.change + '%</span>' : '<span class="chart-badge down">' + data.change + '%</span>';
   var d = document.createElement('div');
   d.className = 'msg-row';
-  d.innerHTML = '<div class="av ai-av">AI</div><div class="chart-box"><div class="chart-title">' + data.title + '</div><div class="chart-wrap"><canvas id="' + id + '"></canvas></div><div class="chart-sum">' + data.summary + '</div></div>';
+  d.innerHTML = '<div class="av ai-av">AI</div><div class="chart-box"><div class="chart-header"><div class="chart-title">' + data.title + '</div>' + badge + '</div><div class="chart-wrap"><canvas id="' + id + '"></canvas></div><div class="chart-sum"><span>Current: <b>$' + parseFloat(prices[prices.length-1]).toLocaleString('en-US',{maximumFractionDigits:4}) + '</b></span><span>High: <b>$' + data.high + '</b></span><span>Low: <b>$' + data.low + '</b></span><span style="margin-left:auto;color:#ccc">CoinGecko</span></div></div>';
   area.appendChild(d);
   scrollDown();
   setTimeout(function() {
     var ctx = document.getElementById(id);
     if (!ctx) return;
-    var prices = data.prices;
-    var up = prices[prices.length-1] >= prices[0];
-    var color = up ? '#16a34a' : '#dc2626';
-    var bg = up ? 'rgba(22,163,74,0.08)' : 'rgba(220,38,38,0.08)';
     new Chart(ctx.getContext('2d'), {
       type: 'line',
-      data: { labels: data.labels, datasets: [{ data: prices, borderColor: color, backgroundColor: bg, borderWidth: 2, pointRadius: 0, tension: 0.4, fill: true }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#f5f5f5' }, ticks: { color: '#bbb', font: { size: 10 }, maxTicksLimit: 4, callback: function(v) { return '$' + (v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(2)); } } } } }
+      data: {
+        labels: data.labels,
+        datasets: [{
+          data: prices,
+          borderColor: color,
+          backgroundColor: up ? 'rgba(22,163,74,0.06)' : 'rgba(220,38,38,0.06)',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.4,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) { return '$' + ctx.parsed.y.toLocaleString('en-US',{maximumFractionDigits:4}); }
+            }
+          }
+        },
+        scales: {
+          x: {
+            display: true,
+            grid: { display: false },
+            ticks: { color: '#ddd', font: { size: 10 }, maxTicksLimit: 6 }
+          },
+          y: {
+            grid: { color: '#f8f8f8' },
+            ticks: {
+              color: '#bbb',
+              font: { size: 10 },
+              maxTicksLimit: 5,
+              callback: function(v) { return '$' + (v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(2)); }
+            }
+          }
+        }
+      }
     });
   }, 100);
 }
@@ -298,9 +360,9 @@ function addTable(data) {
   for (var i = 0; i < data.rows.length; i++) {
     var r = data.rows[i];
     var up = r.change >= 0;
-    rows += '<tr><td><b>' + r.symbol + '</b></td><td>$' + r.price.toLocaleString('en-US',{maximumFractionDigits:4}) + '</td><td><span class="' + (up?'up':'down') + '">' + (up?'+':'') + r.change + '%</span></td><td style="color:#999">$' + (r.volume/1e9).toFixed(1) + 'B</td></tr>';
+    rows += '<tr><td><div class="coin-name">' + r.symbol + '</div><div class="coin-sub">' + r.name + '</div></td><td>$' + r.price.toLocaleString('en-US',{maximumFractionDigits:4}) + '</td><td><span class="' + (up?'up':'down') + '" style="padding:3px 8px;border-radius:6px;">' + (up?'+':'') + r.change + '%</span></td><td style="color:#999">$' + (r.volume/1e9).toFixed(1) + 'B</td></tr>';
   }
-  d.innerHTML = '<div class="av ai-av">AI</div><div class="chart-box" style="max-width:95%"><div class="chart-title">' + data.title + '</div><table class="dtable"><tr><th>Coin</th><th>Price</th><th>24h</th><th>Volume</th></tr>' + rows + '</table><div class="chart-sum">' + data.summary + '</div></div>';
+  d.innerHTML = '<div class="av ai-av">AI</div><div class="table-box"><div class="table-header">Top Coins - Live Market</div><table class="dtable"><tr><th>Coin</th><th>Price</th><th>24h</th><th>Volume</th></tr>' + rows + '</table><div style="color:#ccc;font-size:11px;margin-top:10px;padding-top:8px;border-top:1px solid #f5f5f5;">' + data.summary + '</div></div>';
   area.appendChild(d);
   scrollDown();
 }
@@ -331,7 +393,7 @@ def chat():
     user_msg = messages[-1]["content"] if messages else ""
     msg_lower = user_msg.lower()
 
-    chart_kw = ["chart", "trend", "price", "walk", "show", "btc", "eth", "sol", "bnb", "doge", "xrp"]
+    chart_kw = ["chart", "trend", "btc", "eth", "sol", "bnb", "doge", "xrp", "ada", "avax", "dot", "shib", "ltc", "link"]
     table_kw = ["market", "top", "overview", "all", "coins", "list"]
 
     is_chart = any(k in msg_lower for k in chart_kw)
@@ -350,24 +412,29 @@ def chat():
         labels, prices = get_kline(found_id, days=days)
         if labels and prices:
             change = round((prices[-1] - prices[0]) / prices[0] * 100, 2) if prices[0] else 0
+            high = max(prices)
+            low = min(prices)
             return jsonify({
                 "type": "chart",
-                "title": found_symbol + "/USDT - " + ("7D" if days == 7 else "24H"),
+                "title": found_symbol + "/USDT  " + ("7D" if days == 7 else "24H"),
                 "labels": labels,
                 "prices": prices,
-                "summary": "Current $" + str(round(prices[-1], 4)) + "  |  " + ("+" if change >= 0 else "") + str(change) + "%  |  Source: CoinGecko",
-                "reply": found_symbol + " chart generated"
+                "change": change,
+                "high": round(high, 2),
+                "low": round(low, 2),
+                "summary": "Current $" + str(round(prices[-1], 4)) + " | " + ("+" if change >= 0 else "") + str(change) + "%",
+                "reply": found_symbol + " chart"
             })
 
-    if is_table or (not found_id and not is_chart):
+    if is_table:
         top = get_top_prices()
-        if top and is_table:
+        if top:
             return jsonify({
                 "type": "table",
-                "title": "TOP COINS - LIVE",
+                "title": "Top Coins",
                 "rows": top,
-                "summary": str(len(top)) + " coins  |  Updated " + datetime.datetime.now().strftime("%H:%M"),
-                "reply": "Market overview table"
+                "summary": str(len(top)) + " coins | Updated " + datetime.datetime.now().strftime("%H:%M"),
+                "reply": "Market overview"
             })
 
     price_context = ""
@@ -375,10 +442,10 @@ def chat():
         top = get_top_prices()
         for t in top:
             if t["symbol"] == found_symbol:
-                price_context = " [Live data] " + found_symbol + ": $" + str(t["price"]) + ", 24h=" + str(t["change"]) + "%"
+                price_context = " [Live] " + found_symbol + ": $" + str(t["price"]) + ", 24h=" + str(t["change"]) + "%"
                 break
 
-    system = "You are CryptoVision AI assistant. Answer in the same language the user writes in. Be concise and professional. Do not give specific buy/sell advice. Always remind users that crypto investing involves risk."
+    system = "You are CryptoVision AI. Answer in the same language the user writes in. Be concise and professional. No specific buy/sell advice. Always remind users crypto investing involves risk."
 
     api_msgs = [{"role": "system", "content": system}]
     for h in messages[:-1]:
