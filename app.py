@@ -1,206 +1,81 @@
 from flask import Flask, request, jsonify, render_template_string
 import requests
 import os
-import json
-import re
 import datetime
 
 app = Flask(__name__)
-
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-HTTP_TIMEOUT = 8
-LLM_TIMEOUT = 20
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 
 COIN_MAP = {
-    "btc": "BTCUSDT", "bitcoin": "BTCUSDT", "比特币": "BTCUSDT",
-    "eth": "ETHUSDT", "ethereum": "ETHUSDT", "以太坊": "ETHUSDT",
-    "sol": "SOLUSDT", "solana": "SOLUSDT",
-    "bnb": "BNBUSDT",
-    "xrp": "XRPUSDT", "ripple": "XRPUSDT",
-    "ada": "ADAUSDT", "doge": "DOGEUSDT", "avax": "AVAXUSDT",
-    "link": "LINKUSDT", "ltc": "LTCUSDT", "trx": "TRXUSDT",
-    "dot": "DOTUSDT", "shib": "SHIBUSDT", "uni": "UNIUSDT",
+    "bitcoin": "bitcoin", "btc": "bitcoin",
+    "ethereum": "ethereum", "eth": "ethereum",
+    "solana": "solana", "sol": "solana",
+    "bnb": "binancecoin", "binance": "binancecoin",
+    "doge": "dogecoin", "dogecoin": "dogecoin",
+    "xrp": "ripple", "ripple": "ripple",
+    "ada": "cardano", "cardano": "cardano",
+    "avax": "avalanche-2", "avalanche": "avalanche-2",
+    "dot": "polkadot", "polkadot": "polkadot",
+    "shib": "shiba-inu",
+    "ltc": "litecoin", "litecoin": "litecoin",
+    "link": "chainlink", "chainlink": "chainlink",
+    "uni": "uniswap", "uniswap": "uniswap",
+    "trx": "tron", "tron": "tron",
+    "matic": "matic-network", "polygon": "matic-network",
+    "atom": "cosmos", "cosmos": "cosmos",
 }
 
-SYMBOL_NAME = {
-    "BTCUSDT": "Bitcoin", "ETHUSDT": "Ethereum", "SOLUSDT": "Solana",
-    "BNBUSDT": "BNB", "XRPUSDT": "XRP", "ADAUSDT": "Cardano",
-    "DOGEUSDT": "Dogecoin", "AVAXUSDT": "Avalanche",
-    "LINKUSDT": "Chainlink", "LTCUSDT": "Litecoin", "TRXUSDT": "TRON",
-    "DOTUSDT": "Polkadot", "SHIBUSDT": "Shiba Inu", "UNIUSDT": "Uniswap",
+SYMBOL_MAP = {
+    "bitcoin": "BTC", "ethereum": "ETH", "binancecoin": "BNB",
+    "dogecoin": "DOGE", "solana": "SOL", "ripple": "XRP",
+    "cardano": "ADA", "avalanche-2": "AVAX", "polkadot": "DOT",
+    "shiba-inu": "SHIB", "litecoin": "LTC", "chainlink": "LINK",
+    "uniswap": "UNI", "tron": "TRX", "matic-network": "MATIC",
+    "cosmos": "ATOM",
 }
 
-DEFAULT_SYMBOLS = [
-    "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT",
-    "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "TRXUSDT", "DOTUSDT",
-]
-
-PRODUCT_GROUPS = [
-    {
-        "id": "buy",
-        "title": "买币与换币",
-        "items": [
-            {"name": "Convert 闪兑", "key": "convert", "desc": "快速币币兑换，适合小额、低操作成本的换币场景。"},
-            {"name": "P2P 交易", "key": "p2p", "desc": "用户之间用法币买卖数字资产，重点看商家信誉和付款安全。"},
-            {"name": "银行卡买币", "key": "fiat", "desc": "通过银行卡或第三方通道买币，费用和可用地区会变化。"},
-        ],
-    },
-    {
-        "id": "base",
-        "title": "基础交易",
-        "items": [
-            {"name": "Spot 现货", "key": "spot", "desc": "买卖真实持仓资产，适合基础交易和长期观察。"},
-            {"name": "Margin 杠杆", "key": "margin", "desc": "借贷放大仓位，有利息、强平和爆仓风险。"},
-        ],
-    },
-    {
-        "id": "derivatives",
-        "title": "衍生品",
-        "items": [
-            {"name": "USD-M Futures U本位合约", "key": "usdm", "desc": "以 USDT/USDC 计价结算的永续或交割合约。"},
-            {"name": "COIN-M Futures 币本位合约", "key": "coinm", "desc": "以币本身作为保证金和结算资产。"},
-            {"name": "Options 期权", "key": "options", "desc": "用权利金表达方向、波动率和保护策略。"},
-        ],
-    },
-    {
-        "id": "automation",
-        "title": "策略与自动化",
-        "items": [
-            {"name": "Trading Bots 交易机器人", "key": "bots", "desc": "网格、定投、套利等自动化策略入口。"},
-            {"name": "Copy Trading 跟单", "key": "copy", "desc": "跟随交易员策略，重点看回撤、周期和仓位。"},
-            {"name": "API Trading", "key": "api", "desc": "程序化下单和风控，适合有开发能力的用户。"},
-        ],
-    },
-    {
-        "id": "capital",
-        "title": "资金与收益",
-        "items": [
-            {"name": "Earn 理财", "key": "earn", "desc": "活期、定期、质押等收益产品，不等同于无风险。"},
-            {"name": "Loans 借贷", "key": "loans", "desc": "抵押借币或资金周转，需要关注质押率和清算风险。"},
-        ],
-    },
-]
-
-
-def binance_get(url, params=None):
-    res = requests.get(url, params=params or {}, timeout=HTTP_TIMEOUT)
-    res.raise_for_status()
-    return res.json()
-
-
-def parse_symbol(text):
-    lower = text.lower()
-    for key, symbol in COIN_MAP.items():
-        if key in lower:
-            return symbol
-
-    match = re.search(r"\b([a-z]{2,10})(?:usdt|/usdt)?\b", lower)
-    if match:
-        base = match.group(1).upper()
-        return base if base.endswith("USDT") else base + "USDT"
-
-    return "BTCUSDT"
-
-
-def detect_market_type(text):
-    lower = text.lower()
-    if any(k in lower for k in ["币本位", "coinm", "coin-m"]):
-        return "coinm"
-    if any(k in lower for k in ["u本位", "usdm", "usd-m", "永续", "perp", "futures", "合约"]):
-        return "usdm"
-    if any(k in lower for k in ["杠杆", "margin"]):
-        return "margin"
-    return "spot"
-
-
-def market_endpoint(market_type):
-    if market_type == "usdm":
-        return "https://fapi.binance.com/fapi/v1/ticker/24hr"
-    if market_type == "coinm":
-        return "https://dapi.binance.com/dapi/v1/ticker/24hr"
-    return "https://api.binance.com/api/v3/ticker/24hr"
-
-
-def kline_endpoint(market_type):
-    if market_type == "usdm":
-        return "https://fapi.binance.com/fapi/v1/klines"
-    if market_type == "coinm":
-        return "https://dapi.binance.com/dapi/v1/klines"
-    return "https://api.binance.com/api/v3/klines"
-
-
-def coinm_symbol(symbol):
-    return symbol.replace("USDT", "") + "USD_PERP"
-
-
-def normalize_symbol(symbol, market_type):
-    return coinm_symbol(symbol) if market_type == "coinm" else symbol
-
-
-def get_market_rows(market_type="spot"):
-    if market_type not in ["spot", "margin", "usdm", "coinm"]:
-        market_type = "spot"
-
+def get_top_prices():
     try:
-        if market_type == "coinm":
-            symbols = [coinm_symbol(s) for s in DEFAULT_SYMBOLS[:8]]
-            rows = binance_get(market_endpoint(market_type))
-            rows = [r for r in rows if r.get("symbol") in set(symbols)]
-        else:
-            symbols = DEFAULT_SYMBOLS
-            rows = binance_get(market_endpoint(market_type), {"symbols": json.dumps(symbols)})
-
+        ids = "bitcoin,ethereum,solana,binancecoin,ripple,cardano,dogecoin,avalanche-2,polkadot,chainlink,litecoin,cosmos"
+        res = requests.get(
+            "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=" + ids + "&order=market_cap_desc&sparkline=true",
+            timeout=8
+        )
+        data = res.json()
         result = []
-        for row in rows:
-            raw_symbol = row.get("symbol", "")
-            display_symbol = raw_symbol.replace("USD_PERP", "USDT")
+        for d in data:
             result.append({
-                "symbol": display_symbol,
-                "marketSymbol": raw_symbol,
-                "name": SYMBOL_NAME.get(display_symbol, display_symbol.replace("USDT", "")),
-                "price": float(row.get("lastPrice", 0)),
-                "change": round(float(row.get("priceChangePercent", 0)), 2),
-                "volume": float(row.get("quoteVolume", row.get("volume", 0))),
-                "category": market_type,
+                "symbol": SYMBOL_MAP.get(d["id"], d["symbol"].upper()),
+                "name": d["name"],
+                "price": d["current_price"],
+                "change": round(d["price_change_percentage_24h"] or 0, 2),
+                "volume": d["total_volume"],
+                "market_cap": d["market_cap"],
+                "sparkline": d.get("sparkline_in_7d", {}).get("price", [])
             })
-
-        return sorted(result, key=lambda x: x["volume"], reverse=True)[:12]
-    except Exception:
+        return result
+    except:
         return []
 
-
-def get_kline(symbol, market_type="spot", days=1):
+def get_kline(coin_id, days=1):
     try:
-        target = normalize_symbol(symbol, market_type)
-        interval = "1h" if days <= 7 else "4h"
-        rows = binance_get(
-            kline_endpoint(market_type),
-            {"symbol": target, "interval": interval, "limit": 72},
+        res = requests.get(
+            "https://api.coingecko.com/api/v3/coins/" + coin_id + "/market_chart?vs_currency=usd&days=" + str(days),
+            timeout=8
         )
-
+        data = res.json()
+        prices = data.get("prices", [])
+        step = max(1, len(prices) // 72)
+        sampled = prices[::step][-72:]
         labels = []
-        prices = []
-        for row in rows[-72:]:
-            t = datetime.datetime.fromtimestamp(row[0] / 1000)
+        vals = []
+        for p in sampled:
+            t = datetime.datetime.fromtimestamp(p[0] / 1000)
             labels.append(t.strftime("%m/%d %H:%M") if days > 1 else t.strftime("%H:%M"))
-            prices.append(round(float(row[4]), 4))
-
-        return labels, prices
-    except Exception:
+            vals.append(round(p[1], 6))
+        return labels, vals
+    except:
         return [], []
-
-
-def product_text(key):
-    for group in PRODUCT_GROUPS:
-        for item in group["items"]:
-            if item["key"] == key:
-                return (
-                    item["name"] + "\n\n" +
-                    item["desc"] + "\n\n" +
-                    "我可以继续帮你按 BTC/ETH/SOL 等币种做行情、风险、适用场景和操作注意点分析。"
-                )
-    return ""
-
 
 HTML = """<!DOCTYPE html>
 <html lang="zh">
@@ -210,657 +85,444 @@ HTML = """<!DOCTYPE html>
 <title>CryptoVision</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #0f172a;
-  color: #172033;
-  height: 100vh;
-  overflow: hidden;
+:root {
+  --bg: #060b18;
+  --surface: #0d1526;
+  --surface2: #111d33;
+  --border: #1e2d4a;
+  --accent: #00d4ff;
+  --accent2: #7c3aed;
+  --green: #00e676;
+  --red: #ff1744;
+  --text: #e2e8f0;
+  --muted: #4a6080;
+  --orange: #ff9100;
 }
-.app {
-  height: 100vh;
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  background:
-    radial-gradient(circle at top left, rgba(247,147,26,.20), transparent 28rem),
-    linear-gradient(135deg, #eef2f8 0%, #f8fafc 42%, #e8edf6 100%);
-}
-.topbar {
-  border-bottom: 1px solid rgba(148,163,184,.22);
-  background: rgba(255,255,255,.92);
-  backdrop-filter: blur(18px);
-}
-.topbar-inner {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 14px 24px;
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+.header {
+  background: rgba(13,21,38,0.95);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 20px;
+  height: 56px;
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
+  flex-shrink: 0;
 }
-.brand { display: flex; align-items: center; gap: 12px; }
-.brand-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
-  color: #f7931a;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  font-weight: 900;
-}
-.brand-title { font-size: 21px; font-weight: 900; color: #111827; }
-.brand-sub { color: #64748b; font-size: 12px; margin-top: 2px; }
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #15803d;
-  background: #ecfdf3;
-  border: 1px solid #bbf7d0;
-  padding: 6px 11px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-}
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34,197,94,.12);
-}
-.main {
-  min-height: 0;
-  max-width: 1440px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 18px 24px;
-  display: grid;
-  grid-template-columns: 270px minmax(0, 1fr) 350px;
-  gap: 16px;
-}
-.panel {
-  background: rgba(255,255,255,.94);
-  border: 1px solid rgba(148,163,184,.24);
-  border-radius: 14px;
-  box-shadow: 0 18px 40px rgba(15,23,42,.08);
-  overflow: hidden;
-}
-.panel-head {
-  padding: 14px 15px;
-  border-bottom: 1px solid #e8edf5;
+.logo {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-}
-.panel-title { font-weight: 900; color: #111827; font-size: 14px; }
-.panel-note { color: #64748b; font-size: 12px; margin-top: 2px; }
-.tabs {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-}
-.tab {
-  width: 100%;
-  text-align: left;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  color: #334155;
-  border-radius: 10px;
-  padding: 10px 11px;
-  cursor: pointer;
-  font-size: 13px;
+  gap: 10px;
+  font-size: 18px;
   font-weight: 800;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
-.tab span {
-  display: block;
-  color: #64748b;
-  font-size: 11px;
+.logo-icon {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 900; color: white;
+  -webkit-text-fill-color: white;
+}
+.live-badge {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,230,118,0.1);
+  border: 1px solid rgba(0,230,118,0.3);
+  color: var(--green);
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
   font-weight: 600;
-  margin-top: 3px;
 }
-.tab:hover, .tab.active {
-  border-color: #f7931a;
-  background: #fff7ed;
-  color: #9a4b00;
+.live-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse 2s infinite;
 }
-.product-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0,1fr));
-  gap: 10px;
-  padding: 12px;
-  max-height: 355px;
-  overflow: auto;
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.body { display: flex; flex: 1; overflow: hidden; }
+
+.sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-.product-card {
-  border: 1px solid #e2e8f0;
-  background: #fff;
-  border-radius: 12px;
-  padding: 11px;
-  cursor: pointer;
-}
-.product-card:hover {
-  border-color: #f7931a;
-  box-shadow: 0 8px 18px rgba(247,147,26,.12);
-}
-.product-name {
-  font-size: 12px;
-  font-weight: 900;
-  color: #111827;
-  line-height: 1.35;
-}
-.product-desc {
-  color: #64748b;
+.sidebar-title {
+  padding: 14px 16px 10px;
   font-size: 11px;
-  line-height: 1.45;
-  margin-top: 5px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
-.hero {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0,1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.market-card {
-  background: rgba(255,255,255,.96);
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 14px;
+.coin-list { flex: 1; overflow-y: auto; }
+.coin-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
   cursor: pointer;
-  min-height: 112px;
-  box-shadow: 0 12px 28px rgba(15,23,42,.07);
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
 }
-.market-card:hover { border-color: #f7931a; }
-.market-symbol {
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: .08em;
+.coin-item:hover { background: var(--surface2); border-left-color: var(--accent); }
+.coin-left { display: flex; flex-direction: column; gap: 2px; }
+.coin-sym { font-size: 13px; font-weight: 700; color: var(--text); }
+.coin-name { font-size: 11px; color: var(--muted); }
+.coin-right { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.coin-price { font-size: 12px; font-weight: 600; color: var(--text); }
+.coin-change { font-size: 11px; font-weight: 600; }
+.green { color: var(--green); }
+.red { color: var(--red); }
+
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+.ticker-bar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  overflow-x: auto;
 }
-.market-price {
-  margin-top: 9px;
-  color: #111827;
-  font-size: 22px;
-  font-weight: 950;
+.ticker-card {
+  flex-shrink: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 140px;
 }
-.change {
-  display: inline-flex;
-  margin-top: 8px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 900;
-}
-.up { color: #15803d; background: #ecfdf3; }
-.down { color: #dc2626; background: #fef2f2; }
-.muted { color: #64748b; background: #f1f5f9; }
-.chat-panel {
-  height: calc(100vh - 295px);
-  min-height: 450px;
-  display: grid;
-  grid-template-rows: auto 1fr;
-}
-.chat-scroll {
-  overflow: auto;
-  padding: 16px;
+.ticker-card:hover { border-color: var(--accent); background: rgba(0,212,255,0.05); }
+.tc-sym { font-size: 11px; font-weight: 700; color: var(--muted); margin-bottom: 3px; }
+.tc-price { font-size: 15px; font-weight: 800; color: var(--text); }
+.tc-change { font-size: 11px; font-weight: 600; margin-top: 2px; }
+
+.chat-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  background:
-    linear-gradient(#fff, #fff) padding-box,
-    radial-gradient(circle at top right, rgba(99,102,241,.08), transparent 24rem);
 }
 .msg { display: flex; gap: 10px; align-items: flex-start; }
 .msg.user { flex-direction: row-reverse; }
-.avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  font-weight: 900;
-  flex: 0 0 auto;
+.av {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800;
+  flex-shrink: 0;
 }
-.ai-avatar {
-  color: #f7931a;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
+.ai-av {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: white;
 }
-.user-avatar {
-  color: #334155;
-  background: #e2e8f0;
-  border: 1px solid #cbd5e1;
-}
+.u-av { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
 .bubble {
-  max-width: min(820px, calc(100% - 52px));
-  padding: 13px 15px;
+  max-width: 75%;
+  padding: 12px 15px;
   border-radius: 12px;
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: 13.5px;
+  line-height: 1.7;
 }
-.ai-bubble {
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  color: #283447;
+.ai-b {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
 }
-.user-bubble { background: #111827; color: #fff; }
-.chart-box, .table-box {
-  max-width: 860px;
-  width: 100%;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 15px;
+.u-b {
+  background: linear-gradient(135deg, #0d47a1, #1565c0);
+  color: white;
+  border: 1px solid #1976d2;
 }
-.chart-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-.chart-title, .table-title { font-weight: 900; color: #111827; }
-.chart-wrap { height: 250px; position: relative; }
-.chart-meta {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  color: #64748b;
-  font-size: 12px;
-  border-top: 1px solid #e2e8f0;
-  padding-top: 10px;
-  margin-top: 10px;
-}
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td {
-  padding: 10px 8px;
-  border-top: 1px solid #eef2f7;
-  text-align: right;
-}
-th { color: #64748b; font-size: 11px; }
-th:first-child, td:first-child { text-align: left; }
-.ticker { font-weight: 900; color: #111827; }
-.ticker-name { color: #64748b; font-size: 11px; margin-top: 2px; }
-.market-table {
-  overflow: auto;
-  max-height: 315px;
-  padding: 0 12px 12px;
-}
-.quick-card {
-  padding: 13px;
-  border-top: 1px solid #e8edf5;
-}
-.quick-title {
-  font-size: 12px;
-  color: #64748b;
-  font-weight: 900;
-  letter-spacing: .08em;
-  margin-bottom: 9px;
-}
-.quick-list { display: grid; gap: 8px; }
-.quick-btn {
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #334155;
-  border-radius: 10px;
-  padding: 10px;
-  font-size: 13px;
+
+.chart-card {
+  max-width: 90%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
   cursor: pointer;
-  text-align: left;
+  transition: border-color 0.2s;
 }
-.quick-btn:hover {
-  border-color: #f7931a;
-  background: #fff7ed;
-}
-.input-area {
-  border-top: 1px solid rgba(148,163,184,.28);
-  background: rgba(255,255,255,.94);
-  backdrop-filter: blur(18px);
-}
-.input-inner {
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 12px 24px 16px;
-}
-.chips {
-  display: flex;
-  gap: 8px;
+.chart-card:hover { border-color: var(--accent); }
+.chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.chart-sym { font-size: 14px; font-weight: 800; color: var(--text); }
+.chart-meta { display: flex; gap: 12px; color: var(--muted); font-size: 11px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.chart-wrap { height: 200px; position: relative; }
+.chart-analysis { margin-top: 12px; padding: 10px 12px; background: rgba(0,212,255,0.05); border: 1px solid rgba(0,212,255,0.15); border-radius: 8px; font-size: 12px; color: #a0b4cc; line-height: 1.6; }
+
+.table-card {
+  max-width: 95%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
   overflow-x: auto;
-  margin-bottom: 10px;
 }
+.table-title { font-size: 14px; font-weight: 800; color: var(--text); margin-bottom: 12px; }
+.dtable { width: 100%; border-collapse: collapse; font-size: 12px; }
+.dtable th { color: var(--muted); font-weight: 600; padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; }
+.dtable th:first-child { text-align: left; }
+.dtable td { padding: 9px 10px; border-top: 1px solid rgba(30,45,74,0.5); text-align: right; color: var(--text); }
+.dtable td:first-child { text-align: left; }
+.dtable tr:hover td { background: rgba(0,212,255,0.03); }
+.spark { width: 70px; height: 28px; }
+
+.badge { padding: 3px 8px; border-radius: 5px; font-size: 11px; font-weight: 700; }
+.badge-green { background: rgba(0,230,118,0.15); color: var(--green); }
+.badge-red { background: rgba(255,23,68,0.15); color: var(--red); }
+
+.input-bar {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 10px 16px 12px;
+  flex-shrink: 0;
+}
+.chips { display: flex; gap: 8px; overflow-x: auto; margin-bottom: 10px; scrollbar-width: none; padding-bottom: 2px; }
+.chips::-webkit-scrollbar { display: none; }
 .chip {
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #334155;
-  border-radius: 999px;
-  padding: 8px 12px;
-  font-size: 13px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: #7a95b8;
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
+  transition: all 0.2s;
 }
-.chip:hover {
-  background: #fff7ed;
-  border-color: #f7931a;
-  color: #9a4b00;
-}
-.ask-row { display: flex; gap: 10px; }
-#inp {
+.chip:hover { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.05); }
+.chip:disabled { opacity: 0.4; cursor: not-allowed; }
+.irow { display: flex; gap: 10px; }
+.irow input {
   flex: 1;
-  min-width: 0;
-  height: 48px;
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
-  border-radius: 12px;
-  padding: 0 15px;
-  font-size: 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--text);
   outline: none;
+  transition: all 0.2s;
 }
-#inp:focus {
-  border-color: #f7931a;
-  box-shadow: 0 0 0 3px rgba(247,147,26,.13);
-  background: #fff;
-}
-#send {
-  width: 54px;
-  border: 0;
-  border-radius: 12px;
-  background: #f7931a;
-  color: #fff;
+.irow input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,212,255,0.1); }
+.irow input::placeholder { color: var(--muted); }
+.sbtn {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: none;
+  border-radius: 10px;
+  width: 44px;
+  color: white;
   font-size: 18px;
   cursor: pointer;
-  box-shadow: 0 10px 22px rgba(247,147,26,.25);
+  flex-shrink: 0;
+  transition: all 0.2s;
+  box-shadow: 0 4px 15px rgba(0,212,255,0.3);
 }
-#send:disabled, .chip:disabled, .quick-btn:disabled, .tab:disabled {
-  opacity: .45;
-  cursor: not-allowed;
-}
+.sbtn:hover:not(:disabled) { transform: scale(1.05); box-shadow: 0 6px 20px rgba(0,212,255,0.4); }
+.sbtn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
 .dots span {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin: 0 2px;
-  border-radius: 50%;
-  background: #f7931a;
-  animation: bounce 1.1s infinite;
+  display: inline-block; width: 6px; height: 6px; margin: 0 2px;
+  border-radius: 50%; background: var(--accent);
+  animation: bounce 1.2s infinite;
 }
-.dots span:nth-child(2) { animation-delay: .18s; }
-.dots span:nth-child(3) { animation-delay: .36s; }
-@keyframes bounce {
-  0%,60%,100% { transform: translateY(0); }
-  30% { transform: translateY(-5px); }
+.dots span:nth-child(2) { animation-delay: 0.2s; }
+.dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+
+.modal-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
 }
-@media (max-width: 1180px) {
-  .main { grid-template-columns: 240px 1fr; }
-  .side-right { display: none; }
-  .hero { grid-template-columns: repeat(2, minmax(0,1fr)); }
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  width: 90vw;
+  max-width: 900px;
 }
-@media (max-width: 820px) {
-  body { overflow: auto; }
-  .app { min-height: 100vh; height: auto; }
-  .main { grid-template-columns: 1fr; padding: 12px; }
-  .side-left { order: 2; }
-  .center { order: 1; }
-  .chat-panel { height: auto; min-height: 440px; }
-  .hero { grid-template-columns: 1fr; }
-  .product-grid { grid-template-columns: 1fr; max-height: none; }
-  .topbar-inner, .input-inner { padding-left: 14px; padding-right: 14px; }
-  .brand-sub { display: none; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.modal-title { font-size: 16px; font-weight: 800; color: var(--text); }
+.modal-close { background: none; border: none; color: var(--muted); font-size: 22px; cursor: pointer; padding: 4px; }
+.modal-close:hover { color: var(--text); }
+.modal-chart { height: 380px; position: relative; }
+
+.tab-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.tab-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
 }
+.tab-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.08); }
 </style>
 </head>
 <body>
-<div class="app">
-  <header class="topbar">
-    <div class="topbar-inner">
-      <div class="brand">
-        <div class="brand-mark">B</div>
-        <div>
-          <div class="brand-title">CryptoVision</div>
-          <div class="brand-sub">Binance-style AI market workstation</div>
-        </div>
-      </div>
-      <div class="status-pill"><span class="dot"></span>Binance market data</div>
+
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">CV</div>
+    CryptoVision
+  </div>
+  <div class="live-badge">
+    <div class="live-dot"></div>
+    Live Market Data
+  </div>
+</div>
+
+<div class="body">
+  <div class="sidebar">
+    <div class="sidebar-title">Watchlist</div>
+    <div class="coin-list" id="coinList">
+      <div style="padding:16px;color:var(--muted);font-size:12px;">Loading...</div>
     </div>
-  </header>
+  </div>
 
-  <main class="main">
-    <aside class="panel side-left">
-      <div class="panel-head">
-        <div>
-          <div class="panel-title">交易分类</div>
-          <div class="panel-note">覆盖 Binance 常见入口</div>
-        </div>
-      </div>
-      <div class="tabs" id="groupTabs"></div>
-      <div class="product-grid" id="productGrid"></div>
-    </aside>
+  <div class="main">
+    <div class="ticker-bar" id="tickerBar">
+      <div style="color:var(--muted);font-size:12px;">Loading market data...</div>
+    </div>
 
-    <section class="center">
-      <div class="hero" id="heroCards">
-        <div class="market-card"><div class="market-symbol">BTCUSDT</div><div class="market-price">Loading</div><div class="change muted">Waiting</div></div>
-        <div class="market-card"><div class="market-symbol">ETHUSDT</div><div class="market-price">Loading</div><div class="change muted">Waiting</div></div>
-        <div class="market-card"><div class="market-symbol">SOLUSDT</div><div class="market-price">Loading</div><div class="change muted">Waiting</div></div>
-        <div class="market-card"><div class="market-symbol">BNBUSDT</div><div class="market-price">Loading</div><div class="change muted">Waiting</div></div>
+    <div class="chat-area" id="chatArea">
+      <div class="msg">
+        <div class="av ai-av">AI</div>
+        <div class="bubble ai-b">Welcome to CryptoVision.<br><br>I can generate live price charts, market tables, and AI analysis. Click any coin in the watchlist, or ask me directly.<br><br>Try: "BTC 7 day chart" or "top coins table" or "what is DeFi?"</div>
       </div>
+    </div>
 
-      <div class="panel chat-panel">
-        <div class="panel-head">
-          <div>
-            <div class="panel-title">CryptoVision AI</div>
-            <div class="panel-note">问现货、杠杆、U本位、币本位、期权、机器人、P2P、Earn 都可以</div>
-          </div>
-          <div class="status-pill"><span class="dot"></span>Ready</div>
-        </div>
-        <div class="chat-scroll" id="chatArea">
-          <div class="msg">
-            <div class="avatar ai-avatar">AI</div>
-            <div class="bubble ai-bubble">我已经按 Binance 的交易入口整理好了：买币换币、基础交易、衍生品、策略自动化、资金收益。你可以直接问「BTC U本位合约图」「现货市场排行」「杠杆和合约区别」「P2P 风险」等。</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <aside class="panel side-right">
-      <div class="panel-head">
-        <div>
-          <div class="panel-title">市场排行</div>
-          <div class="panel-note" id="tableTitle">SPOT</div>
-        </div>
-      </div>
-      <div class="market-table" id="marketTable"></div>
-      <div class="quick-card">
-        <div class="quick-title">快速分析</div>
-        <div class="quick-list">
-          <button class="quick-btn" onclick="doSend('现货 market overview')">现货市场概览</button>
-          <button class="quick-btn" onclick="doSend('BTC U本位合约 chart')">BTC U本位合约图</button>
-          <button class="quick-btn" onclick="doSend('杠杆和合约有什么区别')">杠杆 vs 合约</button>
-          <button class="quick-btn" onclick="doSend('P2P交易有什么风险')">P2P 风险清单</button>
-          <button class="quick-btn" onclick="doSend('Trading Bots适合什么行情')">机器人适用行情</button>
-        </div>
-      </div>
-    </aside>
-  </main>
-
-  <footer class="input-area">
-    <div class="input-inner">
+    <div class="input-bar">
       <div class="chips">
-        <button class="chip" onclick="loadMarket('spot'); doSend('现货 market overview')">Spot 现货</button>
-        <button class="chip" onclick="loadMarket('margin'); doSend('Margin 杠杆说明')">Margin 杠杆</button>
-        <button class="chip" onclick="loadMarket('usdm'); doSend('BTC U本位合约 chart')">U本位合约</button>
-        <button class="chip" onclick="loadMarket('coinm'); doSend('BTC 币本位合约 chart')">币本位合约</button>
-        <button class="chip" onclick="doSend('Options 期权适合什么场景')">Options 期权</button>
-        <button class="chip" onclick="doSend('Binance所有交易类型分类')">全部类型</button>
+        <button class="chip" onclick="doSend('BTC chart')">BTC Chart</button>
+        <button class="chip" onclick="doSend('ETH chart')">ETH Chart</button>
+        <button class="chip" onclick="doSend('SOL chart')">SOL Chart</button>
+        <button class="chip" onclick="doSend('top coins table')">Top Coins</button>
+        <button class="chip" onclick="doSend('BTC 7 day chart')">BTC 7D</button>
+        <button class="chip" onclick="doSend('ETH 7 day chart')">ETH 7D</button>
+        <button class="chip" onclick="doSend('market analysis')">AI Analysis</button>
       </div>
-      <div class="ask-row">
-        <input id="inp" placeholder="例如：BTC U本位合约图 / SOL 现货趋势 / Binance所有交易类型分类 / P2P风险..." />
-        <button id="send" onclick="doSend()">&#9658;</button>
+      <div class="irow">
+        <input type="text" id="inp" placeholder="Ask about any coin, chart, or market trend..." />
+        <button class="sbtn" id="sbtn" onclick="doSend()">&#9658;</button>
       </div>
     </div>
-  </footer>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle">Chart</div>
+      <button class="modal-close" onclick="closeModal()">&#10005;</button>
+    </div>
+    <div class="tab-row" id="modalTabs"></div>
+    <div class="modal-chart">
+      <canvas id="modalCanvas"></canvas>
+    </div>
+  </div>
 </div>
 
 <script>
-var busy = false;
-var activeGroup = 'buy';
-var activeMarket = 'spot';
 var chatHistory = [];
-var productGroups = PRODUCT_GROUPS_PLACEHOLDER;
+var busy = false;
+var modalChart = null;
+var currentChartData = null;
 
-function escapeHtml(value) {
-  return String(value == null ? '' : value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function setBusy(v) {
+  busy = v;
+  document.getElementById('sbtn').disabled = v;
+  document.getElementById('inp').disabled = v;
+  document.querySelectorAll('.chip').forEach(function(c) { c.disabled = v; });
 }
 
-function nl2br(value) {
-  return escapeHtml(value).replace(/\\n/g, '<br>');
+function loadMarket() {
+  fetch('/top_prices').then(function(r) { return r.json(); }).then(function(data) {
+    renderTicker(data);
+    renderSidebar(data);
+  }).catch(function() {});
 }
 
-function setBusy(value) {
-  busy = value;
-  document.getElementById('send').disabled = value;
-  document.getElementById('inp').disabled = value;
-  document.querySelectorAll('.chip,.quick-btn,.tab').forEach(function(el) {
-    el.disabled = value;
-  });
-}
-
-function renderGroups() {
-  var box = document.getElementById('groupTabs');
-  box.innerHTML = productGroups.map(function(group) {
-    var active = group.id === activeGroup ? ' active' : '';
-    return '<button class="tab' + active + '" onclick="selectGroup(\\'' + group.id + '\\')">' +
-      escapeHtml(group.title) + '<span>' + group.items.length + ' products</span></button>';
-  }).join('');
-  renderProducts();
-}
-
-function selectGroup(id) {
-  activeGroup = id;
-  renderGroups();
-}
-
-function renderProducts() {
-  var group = productGroups.find(function(item) { return item.id === activeGroup; }) || productGroups[0];
-  var box = document.getElementById('productGrid');
-
-  box.innerHTML = group.items.map(function(item) {
-    return '<div class="product-card" onclick="doSend(\\'' + item.name.replace(/'/g, '') + ' 是什么，适合什么场景\\')">' +
-      '<div class="product-name">' + escapeHtml(item.name) + '</div>' +
-      '<div class="product-desc">' + escapeHtml(item.desc) + '</div>' +
-    '</div>';
+function renderTicker(data) {
+  var bar = document.getElementById('tickerBar');
+  bar.innerHTML = data.slice(0, 8).map(function(d) {
+    var up = d.change >= 0;
+    return '<div class="ticker-card" onclick="doSend(\\'' + d.symbol + ' chart\\')">' +
+      '<div class="tc-sym">' + d.symbol + '/USDT</div>' +
+      '<div class="tc-price">$' + d.price.toLocaleString('en-US',{maximumFractionDigits:4}) + '</div>' +
+      '<div class="tc-change ' + (up?'green':'red') + '">' + (up?'+':'') + d.change + '%</div>' +
+      '</div>';
   }).join('');
 }
 
-function loadMarket(type) {
-  activeMarket = type || 'spot';
-  document.getElementById('tableTitle').textContent = activeMarket.toUpperCase();
-
-  fetch('/markets?type=' + encodeURIComponent(activeMarket))
-    .then(function(r) { return r.json(); })
-    .then(function(rows) {
-      renderHero(rows);
-      renderMarketTable(rows);
-    })
-    .catch(function() {
-      renderHero([]);
-      renderMarketTable([]);
-    });
-}
-
-function renderHero(rows) {
-  var wanted = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
-  var map = {};
-  rows.forEach(function(row) { map[row.symbol] = row; });
-
-  document.getElementById('heroCards').innerHTML = wanted.map(function(symbol) {
-    var row = map[symbol];
-
-    if (!row) {
-      return '<div class="market-card" onclick="doSend(\\'' + symbol + ' chart\\')"><div class="market-symbol">' + symbol + '</div><div class="market-price">Unavailable</div><div class="change muted">Retry later</div></div>';
-    }
-
-    var up = row.change >= 0;
-
-    return '<div class="market-card" onclick="doSend(\\'' + symbol.replace('USDT','') + ' ' + activeMarket + ' chart\\')">' +
-      '<div class="market-symbol">' + escapeHtml(symbol) + '</div>' +
-      '<div class="market-price">$' + Number(row.price).toLocaleString('en-US', { maximumFractionDigits: 4 }) + '</div>' +
-      '<div class="change ' + (up ? 'up' : 'down') + '">' + (up ? '+' : '') + row.change + '%</div>' +
-    '</div>';
+function renderSidebar(data) {
+  var list = document.getElementById('coinList');
+  list.innerHTML = data.map(function(d) {
+    var up = d.change >= 0;
+    return '<div class="coin-item" onclick="doSend(\\'' + d.symbol + ' chart\\')">' +
+      '<div class="coin-left"><div class="coin-sym">' + d.symbol + '</div><div class="coin-name">' + d.name + '</div></div>' +
+      '<div class="coin-right"><div class="coin-price">$' + d.price.toLocaleString('en-US',{maximumFractionDigits:2}) + '</div><div class="coin-change ' + (up?'green':'red') + '">' + (up?'+':'') + d.change + '%</div></div>' +
+      '</div>';
   }).join('');
-}
-
-function renderMarketTable(rows) {
-  var box = document.getElementById('marketTable');
-
-  if (!rows || !rows.length) {
-    box.innerHTML = '<div style="padding:14px;color:#64748b;font-size:13px;">Market data temporarily unavailable.</div>';
-    return;
-  }
-
-  var html = '<table><tr><th>Pair</th><th>Price</th><th>24h</th><th>Volume</th></tr>';
-
-  rows.slice(0, 10).forEach(function(row) {
-    var up = row.change >= 0;
-
-    html += '<tr onclick="doSend(\\'' + row.symbol.replace('USDT','') + ' ' + activeMarket + ' chart\\')" style="cursor:pointer;">' +
-      '<td><div class="ticker">' + escapeHtml(row.symbol) + '</div><div class="ticker-name">' + escapeHtml(row.name) + '</div></td>' +
-      '<td>$' + Number(row.price).toLocaleString('en-US', { maximumFractionDigits: 4 }) + '</td>' +
-      '<td><span class="change ' + (up ? 'up' : 'down') + '">' + (up ? '+' : '') + row.change + '%</span></td>' +
-      '<td>$' + (Number(row.volume) / 1e9).toFixed(2) + 'B</td>' +
-    '</tr>';
-  });
-
-  html += '</table>';
-  box.innerHTML = html;
 }
 
 function doSend(text) {
   if (busy) return;
-
-  var input = document.getElementById('inp');
-  var msg = text || input.value.trim();
-
+  var inp = document.getElementById('inp');
+  var msg = text || inp.value.trim();
   if (!msg) return;
-
-  input.value = '';
+  inp.value = '';
   addUser(msg);
-  chatHistory.push({role: 'user', content: msg});
+  chatHistory.push({role:'user', content:msg});
   setBusy(true);
-
   var typing = addTyping();
-
   fetch('/chat', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
     body: JSON.stringify({messages: chatHistory})
-  })
-    .then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
-    })
-    .then(function(data) {
-      typing.remove();
-
-      if (data.type === 'chart') addChart(data);
-      else if (data.type === 'table') addTable(data);
-      else addAI(data.reply || 'No response received.');
-
-      chatHistory.push({role: 'assistant', content: data.reply || data.summary || ''});
-      setBusy(false);
-    })
-    .catch(function() {
-      typing.remove();
-      addAI('Network error, please retry.');
-      chatHistory.pop();
-      setBusy(false);
-    });
+  }).then(function(r) { return r.json(); }).then(function(data) {
+    typing.remove();
+    if (data.type === 'chart') addChart(data);
+    else if (data.type === 'table') addTable(data);
+    else addAI(data.reply);
+    chatHistory.push({role:'assistant', content: data.reply || data.summary || ''});
+    setBusy(false);
+  }).catch(function() {
+    typing.remove();
+    addAI('Network error, please retry.');
+    chatHistory.pop();
+    setBusy(false);
+  });
 }
 
 document.getElementById('inp').addEventListener('keydown', function(e) {
@@ -868,164 +530,300 @@ document.getElementById('inp').addEventListener('keydown', function(e) {
 });
 
 function addUser(text) {
-  var row = document.createElement('div');
-  row.className = 'msg user';
-  row.innerHTML = '<div class="avatar user-avatar">U</div><div class="bubble user-bubble">' + nl2br(text) + '</div>';
-  document.getElementById('chatArea').appendChild(row);
-  scrollChat();
+  var area = document.getElementById('chatArea');
+  var d = document.createElement('div');
+  d.className = 'msg user';
+  d.innerHTML = '<div class="av u-av">U</div><div class="bubble u-b">' + text + '</div>';
+  area.appendChild(d);
+  scrollDown();
 }
 
 function addAI(text) {
-  var row = document.createElement('div');
-  row.className = 'msg';
-  row.innerHTML = '<div class="avatar ai-avatar">AI</div><div class="bubble ai-bubble">' + nl2br(text) + '</div>';
-  document.getElementById('chatArea').appendChild(row);
-  scrollChat();
+  var area = document.getElementById('chatArea');
+  var d = document.createElement('div');
+  d.className = 'msg';
+  d.innerHTML = '<div class="av ai-av">AI</div><div class="bubble ai-b">' + text.replace(/\n/g,'<br>') + '</div>';
+  area.appendChild(d);
+  scrollDown();
 }
 
 function addTyping() {
-  var row = document.createElement('div');
-  row.className = 'msg';
-  row.innerHTML = '<div class="avatar ai-avatar">AI</div><div class="bubble ai-bubble"><div class="dots"><span></span><span></span><span></span></div></div>';
-  document.getElementById('chatArea').appendChild(row);
-  scrollChat();
-  return row;
+  var area = document.getElementById('chatArea');
+  var d = document.createElement('div');
+  d.className = 'msg';
+  d.innerHTML = '<div class="av ai-av">AI</div><div class="bubble ai-b"><div class="dots"><span></span><span></span><span></span></div></div>';
+  area.appendChild(d);
+  scrollDown();
+  return d;
 }
 
 function addChart(data) {
-  var prices = data.prices || [];
-
-  if (!prices.length) {
-    addAI('Chart data is unavailable right now.');
-    return;
-  }
-
-  var id = 'chart' + Date.now();
-  var up = prices[prices.length - 1] >= prices[0];
-  var row = document.createElement('div');
-
-  row.className = 'msg';
-  row.innerHTML =
-    '<div class="avatar ai-avatar">AI</div><div class="chart-box">' +
-    '<div class="chart-head"><div class="chart-title">' + escapeHtml(data.title) + '</div><span class="change ' + (up ? 'up' : 'down') + '">' + (up ? '+' : '') + data.change + '%</span></div>' +
+  currentChartData = data;
+  var area = document.getElementById('chatArea');
+  var id = 'ch' + Date.now();
+  var up = data.prices[data.prices.length-1] >= data.prices[0];
+  var d = document.createElement('div');
+  d.className = 'msg';
+  var badge = '<span class="badge ' + (up?'badge-green':'badge-red') + '">' + (up?'+':'') + data.change + '%</span>';
+  d.innerHTML = '<div class="av ai-av">AI</div><div class="chart-card" onclick="openModal(this)" data-chart=\'' + JSON.stringify(data).replace(/'/g,'&#39;') + '\'>' +
+    '<div class="chart-header"><div class="chart-sym">' + data.title + '</div>' + badge + '</div>' +
     '<div class="chart-wrap"><canvas id="' + id + '"></canvas></div>' +
-    '<div class="chart-meta"><span>Current: $' + Number(prices[prices.length - 1]).toLocaleString('en-US', { maximumFractionDigits: 4 }) + '</span><span>High: $' + data.high + '</span><span>Low: $' + data.low + '</span><span>' + escapeHtml(data.marketLabel) + '</span></div>' +
+    '<div class="chart-meta">' +
+      '<span>Current: <b style="color:var(--text)">$' + parseFloat(data.prices[data.prices.length-1]).toLocaleString('en-US',{maximumFractionDigits:4}) + '</b></span>' +
+      '<span>High: <b style="color:var(--green)">$' + data.high + '</b></span>' +
+      '<span>Low: <b style="color:var(--red)">$' + data.low + '</b></span>' +
+      '<span style="margin-left:auto;color:var(--muted)">Click to expand</span>' +
+    '</div>' +
+    (data.analysis ? '<div class="chart-analysis">AI: ' + data.analysis + '</div>' : '') +
     '</div>';
-
-  document.getElementById('chatArea').appendChild(row);
-  scrollChat();
-
+  area.appendChild(d);
+  scrollDown();
   setTimeout(function() {
-    var canvas = document.getElementById(id);
-    if (!canvas) return;
-
-    new Chart(canvas.getContext('2d'), {
-      type: 'line',
-      data: {
-        labels: data.labels,
-        datasets: [{
-          data: prices,
-          borderColor: up ? '#16a34a' : '#dc2626',
-          backgroundColor: up ? 'rgba(22,163,74,.08)' : 'rgba(220,38,38,.08)',
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: .35,
-          fill: true
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { display: false }, ticks: { color: '#94a3b8', maxTicksLimit: 6 } },
-          y: { grid: { color: '#eef2f7' }, ticks: { color: '#94a3b8', maxTicksLimit: 5 } }
-        }
-      }
-    });
+    drawChart(id, data.labels, data.prices, up, 200);
   }, 80);
 }
 
-function addTable(data) {
-  var row = document.createElement('div');
-  row.className = 'msg';
-
-  var html = '<div class="avatar ai-avatar">AI</div><div class="table-box"><div class="table-title">' + escapeHtml(data.title || 'Market') + '</div><table><tr><th>Pair</th><th>Price</th><th>24h</th><th>Volume</th></tr>';
-
-  (data.rows || []).forEach(function(item) {
-    var up = item.change >= 0;
-
-    html += '<tr><td><div class="ticker">' + escapeHtml(item.symbol) + '</div><div class="ticker-name">' + escapeHtml(item.name) + '</div></td><td>$' + Number(item.price).toLocaleString('en-US', { maximumFractionDigits: 4 }) + '</td><td><span class="change ' + (up ? 'up' : 'down') + '">' + (up ? '+' : '') + item.change + '%</span></td><td>$' + (Number(item.volume) / 1e9).toFixed(2) + 'B</td></tr>';
+function drawChart(canvasId, labels, prices, up, height) {
+  var ctx = document.getElementById(canvasId);
+  if (!ctx) return null;
+  var color = up ? '#00e676' : '#ff1744';
+  var bg = up ? 'rgba(0,230,118,0.08)' : 'rgba(255,23,68,0.08)';
+  return new Chart(ctx.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: prices,
+        borderColor: color,
+        backgroundColor: bg,
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3,
+        fill: true
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 800, easing: 'easeInOutQuart' },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(13,21,38,0.95)',
+          borderColor: 'rgba(0,212,255,0.3)',
+          borderWidth: 1,
+          callbacks: {
+            label: function(ctx) { return '$' + ctx.parsed.y.toLocaleString('en-US',{maximumFractionDigits:6}); }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(30,45,74,0.5)' },
+          ticks: { color: '#4a6080', font: { size: 10 }, maxTicksLimit: 6 }
+        },
+        y: {
+          grid: { color: 'rgba(30,45,74,0.5)' },
+          ticks: {
+            color: '#4a6080', font: { size: 10 }, maxTicksLimit: 5,
+            callback: function(v) { return '$' + (v >= 1000 ? (v/1000).toFixed(1)+'k' : v.toFixed(4)); }
+          }
+        }
+      }
+    }
   });
-
-  html += '</table><div class="chart-meta">' + escapeHtml(data.summary || '') + '</div></div>';
-
-  row.innerHTML = html;
-  document.getElementById('chatArea').appendChild(row);
-  scrollChat();
 }
 
-function scrollChat() {
-  var area = document.getElementById('chatArea');
+function openModal(el) {
+  var data = JSON.parse(el.getAttribute('data-chart'));
+  var up = data.prices[data.prices.length-1] >= data.prices[0];
+  document.getElementById('modalTitle').textContent = data.title;
+  document.getElementById('modalOverlay').classList.add('show');
+  if (modalChart) { modalChart.destroy(); modalChart = null; }
   setTimeout(function() {
-    area.scrollTop = area.scrollHeight;
-  }, 60);
+    modalChart = drawChart('modalCanvas', data.labels, data.prices, up, 380);
+  }, 80);
 }
 
-renderGroups();
-loadMarket('spot');
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modalOverlay')) {
+    document.getElementById('modalOverlay').classList.remove('show');
+  }
+}
+
+function addTable(data) {
+  var area = document.getElementById('chatArea');
+  var d = document.createElement('div');
+  d.className = 'msg';
+  var rows = data.rows.map(function(r) {
+    var up = r.change >= 0;
+    var spark = r.sparkline && r.sparkline.length > 0 ? '<canvas class="spark" id="sp' + r.symbol + '"></canvas>' : '';
+    return '<tr>' +
+      '<td><div style="font-weight:700;color:var(--text)">' + r.symbol + '</div><div style="color:var(--muted);font-size:11px">' + r.name + '</div></td>' +
+      '<td style="font-weight:700">$' + r.price.toLocaleString('en-US',{maximumFractionDigits:4}) + '</td>' +
+      '<td><span class="badge ' + (up?'badge-green':'badge-red') + '">' + (up?'+':'') + r.change + '%</span></td>' +
+      '<td style="color:var(--muted)">$' + (r.volume/1e9).toFixed(1) + 'B</td>' +
+      '<td>' + spark + '</td>' +
+      '</tr>';
+  }).join('');
+  d.innerHTML = '<div class="av ai-av">AI</div><div class="table-card">' +
+    '<div class="table-title">' + data.title + '</div>' +
+    '<table class="dtable"><tr><th>Coin</th><th>Price</th><th>24h</th><th>Volume</th><th>7D Trend</th></tr>' + rows + '</table>' +
+    '<div style="color:var(--muted);font-size:11px;margin-top:10px">' + data.summary + '</div>' +
+    (data.analysis ? '<div class="chart-analysis">AI: ' + data.analysis + '</div>' : '') +
+    '</div>';
+  area.appendChild(d);
+  scrollDown();
+  setTimeout(function() {
+    data.rows.forEach(function(r) {
+      if (r.sparkline && r.sparkline.length > 0) {
+        var sp = document.getElementById('sp' + r.symbol);
+        if (!sp) return;
+        var sl = r.sparkline.slice(-30);
+        var up = sl[sl.length-1] >= sl[0];
+        new Chart(sp.getContext('2d'), {
+          type: 'line',
+          data: { labels: sl.map(function(_,i){return i;}), datasets: [{ data: sl, borderColor: up?'#00e676':'#ff1744', borderWidth: 1.5, pointRadius: 0, tension: 0.3 }] },
+          options: { responsive: false, plugins: { legend:{display:false}, tooltip:{enabled:false} }, scales: { x:{display:false}, y:{display:false} }, animation:{duration:0} }
+        });
+      }
+    });
+  }, 100);
+}
+
+function scrollDown() {
+  var c = document.getElementById('chatArea');
+  setTimeout(function() { c.scrollTop = c.scrollHeight; }, 80);
+}
+
+loadMarket();
+setInterval(loadMarket, 60000);
 </script>
 </body>
 </html>"""
-
-HTML = HTML.replace("PRODUCT_GROUPS_PLACEHOLDER", json.dumps(PRODUCT_GROUPS, ensure_ascii=False))
-
 
 @app.route("/")
 def index():
     return render_template_string(HTML)
 
-
-@app.route("/markets")
-def markets():
-    market_type = request.args.get("type", "spot")
-    return jsonify(get_market_rows(market_type))
-
-
 @app.route("/top_prices")
 def top_prices():
-    return jsonify(get_market_rows("spot"))
-
+    return jsonify(get_top_prices())
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json(silent=True) or {}
+    data = request.json
     messages = data.get("messages", [])
+    user_msg = messages[-1]["content"] if messages else ""
+    msg_lower = user_msg.lower()
 
-    if not isinstance(messages, list):
-        messages = []
+    chart_kw = ["chart","trend","btc","eth","sol","bnb","doge","xrp","ada","avax","dot","shib","ltc","link","uni","trx","matic","atom","走势","图","比特币","以太坊","索拉纳"]
+    table_kw = ["table","market","top","overview","all","coins","list","行情","排行","主流","概况"]
 
-    user_msg = messages[-1].get("content", "") if messages and isinstance(messages[-1], dict) else ""
+    is_chart = any(k in msg_lower for k in chart_kw)
+    is_table = any(k in msg_lower for k in table_kw)
 
-    if not isinstance(user_msg, str):
-        user_msg = str(user_msg or "")
+    found_id = None
+    found_symbol = None
+    for name, cid in COIN_MAP.items():
+        if name in msg_lower:
+            found_id = cid
+            found_symbol = SYMBOL_MAP.get(cid, cid.upper())
+            break
 
-    user_msg = user_msg.strip()
+    if is_chart and found_id:
+        days = 7 if any(k in msg_lower for k in ["7","week","7day","7d","month","30"]) else 1
+        labels, prices = get_kline(found_id, days=days)
+        if labels and prices:
+            change = round((prices[-1]-prices[0])/prices[0]*100, 2) if prices[0] else 0
+            high = round(max(prices), 4)
+            low = round(min(prices), 4)
 
-    if not user_msg:
-        return jsonify({"type": "text", "reply": "请输入一个币种、交易类型或市场问题。"})
+            system = "You are a crypto market analyst. Give a 2-3 sentence analysis of the price action shown. Be concise. No buy/sell advice."
+            analysis = ""
+            try:
+                r = requests.post(
+                    "https://api.deepseek.com/chat/completions",
+                    headers={"Authorization":"Bearer " + DEEPSEEK_API_KEY, "Content-Type":"application/json"},
+                    json={"model":"deepseek-chat","messages":[
+                        {"role":"system","content":system},
+                        {"role":"user","content":found_symbol + " price: current=$" + str(prices[-1]) + " high=$" + str(high) + " low=$" + str(low) + " change=" + str(change) + "% over " + str(days) + " day(s). Analyze briefly."}
+                    ],"max_tokens":120,"temperature":0.4},
+                    timeout=10
+                )
+                analysis = r.json()["choices"][0]["message"]["content"]
+            except:
+                analysis = ""
 
-    lower = user_msg.lower()
-    market_type = detect_market_type(user_msg)
-    symbol = parse_symbol(user_msg)
+            return jsonify({
+                "type": "chart",
+                "title": found_symbol + "/USDT  " + ("7D" if days==7 else "24H"),
+                "labels": labels,
+                "prices": prices,
+                "change": change,
+                "high": high,
+                "low": low,
+                "analysis": analysis,
+                "summary": "Source: CoinGecko",
+                "reply": found_symbol + " chart"
+            })
 
-    if "所有交易类型" in user_msg or "全部类型" in user_msg or "分类" in user_msg:
-        lines = []
-        for group in PRODUCT_GROUPS:
-            lines.append(group["title"])
-            for item in group["items"]:
-                lines.append("- " + item["name"] + ": " + item["desc"])
-        return jsonify({"type": "text", "reply": "\n".join(lines)})
+    if is_table:
+        top = get_top_prices()
+        if top:
+            system = "You are a crypto analyst. Summarize the current market in 2 sentences based on the top coins data. No buy/sell advice."
+            analysis = ""
+            try:
+                summary_data = ", ".join([t["symbol"] + "=" + str(t["change"]) + "%" for t in top[:6]])
+                r = requests.post(
+                    "https://api.deepseek.com/chat/completions",
+                    headers={"Authorization":"Bearer " + DEEPSEEK_API_KEY, "Content-Type":"application/json"},
+                    json={"model":"deepseek-chat","messages":[
+                        {"role":"system","content":system},
+                        {"role":"user","content":"Current 24h changes: " + summary_data}
+                    ],"max_tokens":100,"temperature":0.4},
+                    timeout=10
+                )
+                analysis = r.json()["choices"][0]["message"]["content"]
+            except:
+                analysis = ""
 
-    if any(k in lower for k in ["market", "overview", "top", "list", "排行", "市场", "概览"]):
-        rows = get_market_rows(market_type
+            return jsonify({
+                "type": "table",
+                "title": "Top Coins - Live Market",
+                "rows": top,
+                "analysis": analysis,
+                "summary": str(len(top)) + " coins  |  Updated " + datetime.datetime.now().strftime("%H:%M") + "  |  CoinGecko",
+                "reply": "Market overview"
+            })
+
+    price_context = ""
+    if found_id:
+        top = get_top_prices()
+        for t in top:
+            if t["symbol"] == found_symbol:
+                price_context = " [Live] " + found_symbol + ": $" + str(t["price"]) + ", 24h=" + str(t["change"]) + "%"
+                break
+
+    system = "You are CryptoVision AI. Answer in the same language the user uses. Be concise and professional. No specific buy/sell advice. Remind users crypto investing carries risk when relevant."
+
+    api_msgs = [{"role":"system","content":system}]
+    for h in messages[:-1]:
+        api_msgs.append(h)
+    api_msgs.append({"role":"user","content":user_msg + price_context})
+
+    try:
+        res = requests.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization":"Bearer " + DEEPSEEK_API_KEY, "Content-Type":"application/json"},
+            json={"model":"deepseek-chat","messages":api_msgs,"max_tokens":500,"temperature":0.4},
+            timeout=12
+        )
+        reply = res.json()["choices"][0]["message"]["content"]
+    except:
+        reply = "Network timeout, please retry."
+
+    return jsonify({"type":"text","reply":reply})
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
