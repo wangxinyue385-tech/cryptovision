@@ -1,78 +1,80 @@
 from flask import Flask, request, jsonify, render_template_string
 import requests
 import os
-import json
 
 app = Flask(__name__)
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
 
 COIN_MAP = {
-    "比特币": "BTC", "bitcoin": "BTC", "btc": "BTC",
-    "以太坊": "ETH", "ethereum": "ETH", "eth": "ETH",
-    "bnb": "BNB", "币安币": "BNB",
-    "狗狗币": "DOGE", "dogecoin": "DOGE", "doge": "DOGE",
-    "sol": "SOL", "solana": "SOL", "索拉纳": "SOL",
-    "xrp": "XRP", "瑞波": "XRP", "ripple": "XRP",
-    "ada": "ADA", "cardano": "ADA",
-    "dot": "DOT", "polkadot": "DOT", "波卡": "DOT",
-    "avax": "AVAX", "avalanche": "AVAX",
-    "matic": "MATIC", "polygon": "MATIC",
-    "link": "LINK", "chainlink": "LINK",
-    "ltc": "LTC", "litecoin": "LTC", "莱特币": "LTC",
-    "shib": "SHIB", "柴犬币": "SHIB",
-    "trx": "TRX", "tron": "TRX",
-    "uni": "UNI", "uniswap": "UNI",
+    "比特币": "bitcoin", "bitcoin": "bitcoin", "btc": "bitcoin",
+    "以太坊": "ethereum", "ethereum": "ethereum", "eth": "ethereum",
+    "bnb": "binancecoin", "币安币": "binancecoin",
+    "狗狗币": "dogecoin", "doge": "dogecoin",
+    "sol": "solana", "solana": "solana", "索拉纳": "solana",
+    "xrp": "ripple", "瑞波": "ripple",
+    "ada": "cardano", "cardano": "cardano",
+    "avax": "avalanche-2", "avalanche": "avalanche-2",
+    "dot": "polkadot", "polkadot": "polkadot",
+    "shib": "shiba-inu", "柴犬": "shiba-inu",
+    "ltc": "litecoin", "litecoin": "litecoin",
+    "link": "chainlink", "chainlink": "chainlink",
+    "uni": "uniswap", "uniswap": "uniswap",
+    "atom": "cosmos", "cosmos": "cosmos",
+    "trx": "tron", "tron": "tron",
+    "matic": "matic-network", "polygon": "matic-network",
 }
 
-def get_price(symbol):
-    try:
-        s = symbol.upper()
-        if not s.endswith("-USDT"):
-            s = s + "-USDT"
-        res = requests.get(f"https://www.okx.com/api/v5/market/ticker?instId={s}", timeout=5)
-        d = res.json()
-        if d["code"] != "0":
-            return None
-        t = d["data"][0]
-        price = float(t["last"])
-        change = (float(t["last"]) - float(t["open24h"])) / float(t["open24h"]) * 100
-        return {
-            "symbol": symbol.upper(),
-            "price": price,
-            "change": round(change, 2),
-            "high": float(t["high24h"]),
-            "low": float(t["low24h"]),
-            "volume": float(t["vol24h"])
-        }
-    except:
-        return None
-
-def get_kline(symbol, bar="1H", limit=24):
-    try:
-        s = symbol.upper()
-        if not s.endswith("-USDT"):
-            s = s + "-USDT"
-        res = requests.get(
-            f"https://www.okx.com/api/v5/market/candles?instId={s}&bar={bar}&limit={limit}",
-            timeout=5
-        )
-        d = res.json()
-        if d["code"] != "0":
-            return None
-        candles = d["data"]
-        candles.reverse()
-        return [{"time": c[0], "open": float(c[1]), "high": float(c[2]), "low": float(c[3]), "close": float(c[4])} for c in candles]
-    except:
-        return None
+SYMBOL_MAP = {
+    "bitcoin": "BTC", "ethereum": "ETH", "binancecoin": "BNB",
+    "dogecoin": "DOGE", "solana": "SOL", "ripple": "XRP",
+    "cardano": "ADA", "avalanche-2": "AVAX", "polkadot": "DOT",
+    "shiba-inu": "SHIB", "litecoin": "LTC", "chainlink": "LINK",
+    "uniswap": "UNI", "cosmos": "ATOM", "tron": "TRX",
+    "matic-network": "MATIC",
+}
 
 def get_top_prices():
-    symbols = ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "DOGE", "AVAX"]
-    result = []
-    for s in symbols:
-        p = get_price(s)
-        if p:
-            result.append(p)
-    return result
+    try:
+        ids = "bitcoin,ethereum,solana,binancecoin,ripple,cardano,dogecoin,avalanche-2"
+        res = requests.get(
+            f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={ids}&order=market_cap_desc&sparkline=false",
+            timeout=8
+        )
+        data = res.json()
+        result = []
+        for d in data:
+            result.append({
+                "symbol": SYMBOL_MAP.get(d["id"], d["symbol"].upper()),
+                "name": d["name"],
+                "price": d["current_price"],
+                "change": round(d["price_change_percentage_24h"] or 0, 2),
+                "volume": d["total_volume"],
+                "market_cap": d["market_cap"]
+            })
+        return result
+    except Exception as e:
+        return []
+
+def get_kline(coin_id, days=1):
+    try:
+        res = requests.get(
+            f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days={days}",
+            timeout=8
+        )
+        data = res.json()
+        prices = data.get("prices", [])
+        step = max(1, len(prices) // 48)
+        sampled = prices[::step][-48:]
+        labels = []
+        vals = []
+        for p in sampled:
+            import datetime
+            t = datetime.datetime.fromtimestamp(p[0]/1000)
+            labels.append(t.strftime("%H:%M"))
+            vals.append(round(p[1], 4))
+        return labels, vals
+    except:
+        return [], []
 
 HTML = '''<!DOCTYPE html>
 <html lang="zh">
@@ -83,95 +85,92 @@ HTML = '''<!DOCTYPE html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0a0a14; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f0f2f5; color: #1a1a2e; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
-.header { padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 0.5px solid #1a1a2e; flex-shrink: 0; }
-.logo { color: #F7931A; font-weight: 600; font-size: 16px; }
-.live-dot { color: #4caf50; font-size: 11px; }
+.header { background: white; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; flex-shrink: 0; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.logo { color: #F7931A; font-weight: 700; font-size: 17px; }
+.live-dot { color: #4caf50; font-size: 11px; background: #f0fff4; padding: 3px 8px; border-radius: 10px; border: 1px solid #c6f6d5; }
 
 .content { flex: 1; overflow-y: auto; padding: 12px 16px; }
 
 .top-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
-.price-card { background: #1a1a2e; border-radius: 10px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; border: 0.5px solid transparent; }
-.price-card:hover { border-color: #F7931A44; }
-.price-card.active { border-color: #F7931A; }
-.card-symbol { color: #666; font-size: 10px; margin-bottom: 4px; }
-.card-price { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
-.card-change { font-size: 10px; }
-.up { color: #4caf50; }
-.down { color: #f44336; }
+.price-card { background: white; border-radius: 12px; padding: 12px; text-align: center; cursor: pointer; transition: all 0.2s; border: 1.5px solid #eee; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+.price-card:hover { border-color: #F7931A88; box-shadow: 0 2px 8px rgba(247,147,26,0.15); transform: translateY(-1px); }
+.card-symbol { color: #999; font-size: 10px; margin-bottom: 4px; font-weight: 500; }
+.card-price { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+.card-change { font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 6px; display: inline-block; }
+.up { color: #16a34a; background: #f0fdf4; }
+.down { color: #dc2626; background: #fef2f2; }
 
 .chat-area { display: flex; flex-direction: column; gap: 12px; }
 
 .msg-row { display: flex; gap: 8px; align-items: flex-start; }
 .msg-row.user { flex-direction: row-reverse; }
-.avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
-.ai-avatar { background: #F7931A; color: #0a0a14; font-weight: 600; font-size: 10px; }
-.user-avatar { background: #2a2a3e; }
-.bubble { max-width: 85%; padding: 10px 14px; border-radius: 16px; font-size: 13px; line-height: 1.6; }
-.ai-bubble { background: #1a1a2e; color: #ddd; border-bottom-left-radius: 4px; }
-.user-bubble { background: #F7931A; color: #0a0a14; border-bottom-right-radius: 4px; font-weight: 500; }
-.chart-bubble { background: #1a1a2e; border-radius: 12px; padding: 14px; max-width: 95%; }
-.chart-title { color: #aaa; font-size: 11px; margin-bottom: 10px; }
-.chart-wrap { position: relative; height: 160px; }
-.table-wrap { width: 100%; }
-.data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.data-table th { color: #555; font-weight: normal; padding: 4px 6px; text-align: right; }
+.avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; font-weight: 700; }
+.ai-avatar { background: linear-gradient(135deg, #F7931A, #FFD700); color: white; }
+.user-avatar { background: #e8eaf6; color: #5c6bc0; }
+.bubble { max-width: 82%; padding: 10px 14px; border-radius: 16px; font-size: 13px; line-height: 1.7; }
+.ai-bubble { background: white; color: #333; border-bottom-left-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); border: 1px solid #f0f0f0; }
+.user-bubble { background: linear-gradient(135deg, #F7931A, #FFB347); color: white; border-bottom-right-radius: 4px; box-shadow: 0 2px 8px rgba(247,147,26,0.3); }
+
+.chart-bubble { background: white; border-radius: 14px; padding: 14px; max-width: 95%; box-shadow: 0 1px 6px rgba(0,0,0,0.08); border: 1px solid #f0f0f0; }
+.chart-title { color: #666; font-size: 11px; font-weight: 600; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.chart-wrap { position: relative; height: 150px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.data-table th { color: #999; font-weight: 500; padding: 4px 8px; text-align: right; font-size: 11px; }
 .data-table th:first-child { text-align: left; }
-.data-table td { padding: 6px 6px; border-top: 0.5px solid #ffffff08; text-align: right; color: #ccc; }
-.data-table td:first-child { text-align: left; color: #aaa; }
+.data-table td { padding: 8px 8px; border-top: 1px solid #f5f5f5; text-align: right; color: #333; }
+.data-table td:first-child { text-align: left; color: #666; font-weight: 500; }
+.chart-summary { color: #999; font-size: 11px; margin-top: 10px; padding-top: 8px; border-top: 1px solid #f5f5f5; }
 
-.bottom-nav { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 0.5px solid #1a1a2e; flex-shrink: 0; }
-.nav-item { padding: 10px 0; text-align: center; cursor: pointer; border-top: 2px solid transparent; transition: all 0.2s; }
-.nav-item.active { border-top-color: #F7931A; }
-.nav-item.active .nav-label { color: #F7931A; }
-.nav-icon { font-size: 16px; margin-bottom: 2px; }
-.nav-label { font-size: 9px; color: #444; }
-
-.input-area { padding: 10px 16px; border-top: 0.5px solid #1a1a2e; flex-shrink: 0; }
-.quick-chips { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; margin-bottom: 8px; padding-bottom: 2px; scrollbar-width: none; }
+.input-area { background: white; padding: 10px 14px; border-top: 1px solid #eee; flex-shrink: 0; box-shadow: 0 -1px 4px rgba(0,0,0,0.04); }
+.quick-chips { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; margin-bottom: 8px; scrollbar-width: none; }
 .quick-chips::-webkit-scrollbar { display: none; }
-.chip { background: #1a1a2e; border: 0.5px solid #2a2a3e; color: #888; border-radius: 14px; padding: 4px 10px; font-size: 11px; cursor: pointer; white-space: nowrap; transition: all 0.2s; flex-shrink: 0; }
-.chip:hover:not(:disabled) { border-color: #F7931A; color: #F7931A; }
+.chip { background: #f8f9fa; border: 1px solid #eee; color: #666; border-radius: 14px; padding: 5px 12px; font-size: 11px; cursor: pointer; white-space: nowrap; transition: all 0.2s; }
+.chip:hover:not(:disabled) { background: #fff3e0; border-color: #F7931A; color: #F7931A; }
 .chip:disabled { opacity: 0.4; cursor: not-allowed; }
-.input-row { display: flex; gap: 8px; }
-.input-row input { flex: 1; background: #1a1a2e; border: 0.5px solid #2a2a3e; border-radius: 20px; padding: 9px 14px; font-size: 13px; color: #e0e0e0; outline: none; }
-.input-row input:focus { border-color: #F7931A44; }
-.send-btn { background: #F7931A; border: none; border-radius: 50%; width: 36px; height: 36px; color: #0a0a14; font-size: 16px; cursor: pointer; flex-shrink: 0; transition: all 0.2s; }
-.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.typing { color: #555; font-size: 12px; padding: 4px 0; }
+.input-row { display: flex; gap: 8px; align-items: center; }
+.input-row input { flex: 1; background: #f8f9fa; border: 1.5px solid #eee; border-radius: 22px; padding: 9px 16px; font-size: 13px; color: #333; outline: none; transition: all 0.2s; }
+.input-row input:focus { border-color: #F7931A88; background: white; box-shadow: 0 0 0 3px rgba(247,147,26,0.1); }
+.send-btn { background: linear-gradient(135deg, #F7931A, #FFB347); border: none; border-radius: 50%; width: 38px; height: 38px; color: white; font-size: 16px; cursor: pointer; flex-shrink: 0; box-shadow: 0 2px 8px rgba(247,147,26,0.4); transition: all 0.2s; }
+.send-btn:hover:not(:disabled) { transform: scale(1.05); }
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.typing-dots { display: inline-flex; gap: 3px; }
+.typing-dots span { width: 6px; height: 6px; background: #F7931A; border-radius: 50%; animation: bounce 1.2s infinite; }
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
 </style>
 </head>
 <body>
 
 <div class="header">
   <div class="logo">₿ CryptoVision</div>
-  <div class="live-dot">● 实时</div>
+  <div class="live-dot">● 实时数据</div>
 </div>
 
 <div class="content" id="content">
-  <div class="top-cards" id="topCards">
-    <div class="price-card" onclick="askCoin('BTC')">
-      <div class="card-symbol">BTC</div>
-      <div class="card-price" style="color:#F7931A" id="btc-price">--</div>
+  <div class="top-cards">
+    <div class="price-card" onclick="sendMsg('BTC走势图')">
+      <div class="card-symbol">BITCOIN</div>
+      <div class="card-price" style="color:#F7931A" id="btc-price">加载中...</div>
       <div class="card-change" id="btc-change">--</div>
     </div>
-    <div class="price-card" onclick="askCoin('ETH')">
-      <div class="card-symbol">ETH</div>
-      <div class="card-price" style="color:#627EEA" id="eth-price">--</div>
+    <div class="price-card" onclick="sendMsg('ETH走势图')">
+      <div class="card-symbol">ETHEREUM</div>
+      <div class="card-price" style="color:#627EEA" id="eth-price">加载中...</div>
       <div class="card-change" id="eth-change">--</div>
     </div>
-    <div class="price-card" onclick="askCoin('SOL')">
-      <div class="card-symbol">SOL</div>
-      <div class="card-price" style="color:#9945FF" id="sol-price">--</div>
+    <div class="price-card" onclick="sendMsg('SOL走势图')">
+      <div class="card-symbol">SOLANA</div>
+      <div class="card-price" style="color:#9945FF" id="sol-price">加载中...</div>
       <div class="card-change" id="sol-change">--</div>
     </div>
   </div>
   <div class="chat-area" id="chatArea">
     <div class="msg-row">
       <div class="avatar ai-avatar">AI</div>
-      <div class="bubble ai-bubble">你好！我可以帮你查询实时行情、生成图表、分析市场数据。<br><br>试试问我：<br>• BTC今天走势怎么样？<br>• 哪些合约资金费率最高？<br>• ETH最近30天表现如何？</div>
+      <div class="bubble ai-bubble">👋 你好！我是 CryptoVision AI。<br><br>我可以帮你：<br>• 查询任意币种实时价格<br>• 生成走势图表<br>• 分析市场行情<br>• 回答币圈问题<br><br>试试点击上方价格卡片，或直接提问！</div>
     </div>
   </div>
 </div>
@@ -208,23 +207,19 @@ async function loadTopPrices() {
     const data = await res.json();
     const map = {};
     data.forEach(d => map[d.symbol] = d);
-    ["BTC","ETH","SOL"].forEach(s => {
+    [["BTC","btc","#F7931A"],["ETH","eth","#627EEA"],["SOL","sol","#9945FF"]].forEach(([s,id,color]) => {
       if (map[s]) {
-        const el = document.getElementById(s.toLowerCase()+"-price");
-        const cel = document.getElementById(s.toLowerCase()+"-change");
-        if (el) el.textContent = "$" + map[s].price.toLocaleString("en", {maximumFractionDigits:2});
-        if (cel) {
+        const pe = document.getElementById(id+"-price");
+        const ce = document.getElementById(id+"-change");
+        if (pe) pe.textContent = "$" + map[s].price.toLocaleString("en-US", {maximumFractionDigits:2});
+        if (ce) {
           const up = map[s].change >= 0;
-          cel.textContent = (up?"+":"") + map[s].change + "%";
-          cel.className = "card-change " + (up?"up":"down");
+          ce.textContent = (up?"+":"") + map[s].change + "%";
+          ce.className = "card-change " + (up?"up":"down");
         }
       }
     });
   } catch(e) {}
-}
-
-function askCoin(symbol) {
-  sendMsg(symbol + "走势图");
 }
 
 async function sendMsg(text) {
@@ -264,7 +259,7 @@ async function sendMsg(text) {
   } catch(e) {
     clearTimeout(timeout);
     typing.remove();
-    appendAIMsg("网络超时，请重试～");
+    appendAIMsg("⚠️ 网络超时，请重试～");
     history.pop();
   } finally {
     setLoading(false);
@@ -293,7 +288,7 @@ function appendTyping() {
   const area = document.getElementById("chatArea");
   const div = document.createElement("div");
   div.className = "msg-row";
-  div.innerHTML = `<div class="avatar ai-avatar">AI</div><div class="bubble ai-bubble typing">正在获取数据...</div>`;
+  div.innerHTML = `<div class="avatar ai-avatar">AI</div><div class="bubble ai-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
   area.appendChild(div);
   scrollBottom();
   return div;
@@ -309,45 +304,50 @@ function appendChart(data) {
     <div class="chart-bubble">
       <div class="chart-title">${data.title}</div>
       <div class="chart-wrap"><canvas id="${id}"></canvas></div>
-      <div style="color:#666; font-size:10px; margin-top:8px;">${data.summary}</div>
+      <div class="chart-summary">${data.summary}</div>
     </div>`;
   area.appendChild(div);
   scrollBottom();
 
-  const ctx = document.getElementById(id).getContext("2d");
-  const labels = data.labels;
-  const prices = data.prices;
-  const up = prices[prices.length-1] >= prices[0];
+  setTimeout(() => {
+    const ctx = document.getElementById(id);
+    if (!ctx) return;
+    const prices = data.prices;
+    const up = prices[prices.length-1] >= prices[0];
+    const color = up ? "#16a34a" : "#dc2626";
+    const bgColor = up ? "rgba(22,163,74,0.08)" : "rgba(220,38,38,0.08)";
 
-  if (chartInstances[id]) chartInstances[id].destroy();
-  chartInstances[id] = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [{
-        data: prices,
-        borderColor: up ? "#4caf50" : "#f44336",
-        backgroundColor: up ? "rgba(76,175,80,0.1)" : "rgba(244,67,54,0.1)",
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.3,
-        fill: true
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { display: false },
-        y: {
-          grid: { color: "#ffffff08" },
-          ticks: { color: "#555", font: { size: 10 }, maxTicksLimit: 4,
-            callback: v => "$" + (v >= 1000 ? (v/1000).toFixed(1)+"k" : v.toFixed(2)) }
+    new Chart(ctx.getContext("2d"), {
+      type: "line",
+      data: {
+        labels: data.labels,
+        datasets: [{
+          data: prices,
+          borderColor: color,
+          backgroundColor: bgColor,
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.4,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: ctx => "$" + ctx.parsed.y.toLocaleString("en-US", {maximumFractionDigits:4}) }
+        }},
+        scales: {
+          x: { display: false },
+          y: {
+            grid: { color: "#f5f5f5" },
+            ticks: { color: "#bbb", font: { size: 10 }, maxTicksLimit: 4,
+              callback: v => "$" + (v >= 1000 ? (v/1000).toFixed(1)+"k" : v.toFixed(2)) }
+          }
         }
       }
-    }
-  });
+    });
+  }, 100);
 }
 
 function appendTable(data) {
@@ -356,22 +356,20 @@ function appendTable(data) {
   div.className = "msg-row";
   let rows = data.rows.map(r => `
     <tr>
-      <td>${r.symbol}</td>
-      <td>$${r.price.toLocaleString("en",{maximumFractionDigits:4})}</td>
-      <td class="${r.change>=0?'up':'down'}">${r.change>=0?'+':''}${r.change}%</td>
-      <td style="color:#555;">$${(r.volume/1e9).toFixed(2)}B</td>
+      <td><b>${r.symbol}</b><br><span style="color:#bbb;font-size:10px;">${r.name||''}</span></td>
+      <td>$${r.price.toLocaleString("en-US",{maximumFractionDigits:4})}</td>
+      <td><span class="${r.change>=0?'up':'down'}" style="padding:2px 6px;border-radius:5px;">${r.change>=0?'+':''}${r.change}%</span></td>
+      <td style="color:#999;">$${(r.volume/1e9).toFixed(1)}B</td>
     </tr>`).join("");
   div.innerHTML = `
     <div class="avatar ai-avatar">AI</div>
     <div class="chart-bubble" style="max-width:95%;">
       <div class="chart-title">${data.title}</div>
-      <div class="table-wrap">
-        <table class="data-table">
-          <tr><th>币种</th><th>价格</th><th>24h</th><th>成交量</th></tr>
-          ${rows}
-        </table>
-      </div>
-      <div style="color:#666; font-size:10px; margin-top:8px;">${data.summary}</div>
+      <table class="data-table">
+        <tr><th>币种</th><th>价格</th><th>24h</th><th>成交量</th></tr>
+        ${rows}
+      </table>
+      <div class="chart-summary">${data.summary}</div>
     </div>`;
   area.appendChild(div);
   scrollBottom();
@@ -379,11 +377,11 @@ function appendTable(data) {
 
 function scrollBottom() {
   const c = document.getElementById("content");
-  setTimeout(() => c.scrollTop = c.scrollHeight, 50);
+  setTimeout(() => c.scrollTop = c.scrollHeight, 80);
 }
 
 loadTopPrices();
-setInterval(loadTopPrices, 30000);
+setInterval(loadTopPrices, 60000);
 </script>
 </body>
 </html>'''
@@ -398,40 +396,38 @@ def top_prices():
 
 @app.route("/chat", methods=["POST"])
 def chat():
+    import datetime
     data = request.json
     messages = data.get("messages", [])
     user_msg = messages[-1]["content"] if messages else ""
     msg_lower = user_msg.lower()
 
-    # 检测是否是走势图请求
-    chart_keywords = ["走势", "图", "chart", "趋势", "k线", "价格变化", "最近"]
+    chart_keywords = ["走势", "图", "chart", "趋势", "k线", "价格变化", "最近", "今天", "今日"]
     is_chart = any(k in msg_lower for k in chart_keywords)
 
-    # 检测是否是行情表格请求
-    table_keywords = ["行情", "排行", "主流币", "所有", "市场概况", "概况", "top"]
+    table_keywords = ["行情", "排行", "主流币", "市场概况", "概况", "所有", "top", "列表"]
     is_table = any(k in msg_lower for k in table_keywords)
 
-    # 找到币种
+    found_id = None
     found_symbol = None
-    for name, symbol in COIN_MAP.items():
+    for name, cid in COIN_MAP.items():
         if name in msg_lower:
-            found_symbol = symbol
+            found_id = cid
+            found_symbol = SYMBOL_MAP.get(cid, cid.upper())
             break
 
-    if is_chart and found_symbol:
-        kline = get_kline(found_symbol, bar="1H", limit=24)
-        price_data = get_price(found_symbol)
-        if kline and price_data:
-            labels = [str(i)+"h" for i in range(len(kline))]
-            prices = [c["close"] for c in kline]
-            change = price_data["change"]
+    if is_chart and found_id:
+        days = 7 if any(k in msg_lower for k in ["7天","一周","week","30天","月"]) else 1
+        labels, prices = get_kline(found_id, days=days)
+        if labels and prices:
+            change = round((prices[-1]-prices[0])/prices[0]*100, 2) if prices[0] else 0
             return jsonify({
                 "type": "chart",
-                "title": f"{found_symbol}/USDT · 24小时走势",
+                "title": f"{found_symbol}/USDT · {'7日' if days==7 else '24H'} 走势",
                 "labels": labels,
                 "prices": prices,
-                "summary": f"当前价格 ${price_data['price']:,.4f} · 24h {'▲' if change>=0 else '▼'} {abs(change)}% · 最高 ${price_data['high']:,.2f} · 最低 ${price_data['low']:,.2f}",
-                "reply": f"{found_symbol} 24小时走势图"
+                "summary": f"当前 ${prices[-1]:,.4f} · {'▲' if change>=0 else '▼'} {abs(change)}% · 数据来源 CoinGecko",
+                "reply": f"{found_symbol} 走势图已生成"
             })
 
     if is_table:
@@ -441,22 +437,21 @@ def chat():
                 "type": "table",
                 "title": "主流币实时行情",
                 "rows": top,
-                "summary": f"数据来自 OKX · 共 {len(top)} 个币种",
+                "summary": f"共 {len(top)} 个币种 · 数据来源 CoinGecko · {datetime.datetime.now().strftime('%H:%M')} 更新",
                 "reply": "主流币行情表格"
             })
 
-    # 普通AI对话
     price_context = ""
-    if found_symbol:
-        p = get_price(found_symbol)
-        if p:
-            price_context = f"\n\n[实时数据] {found_symbol}: 价格=${p['price']}, 24h变化={p['change']}%, 最高=${p['high']}, 最低=${p['low']}"
+    if found_id:
+        top = get_top_prices()
+        for t in top:
+            if t["symbol"] == found_symbol:
+                price_context = f"\n\n[实时数据] {found_symbol}: 价格=${t['price']}, 24h={t['change']}%"
+                break
 
-    system = """你是CryptoVision的AI助手，专业分析加密货币市场。
-支持中英文。回复简洁专业，3-5句话为宜。
-如果有实时数据，直接引用。
-不给具体买卖建议，但可以分析市场情况。
-投资有风险，适时提醒用户。"""
+    system = """你是CryptoVision的AI助手，专业分析加密货币市场。支持中英文。
+回复简洁专业，3-5句话。有实时数据时直接引用。
+不给具体买卖建议，但可以分析市场情况。投资有风险请提醒用户。"""
 
     api_msgs = [{"role": "system", "content": system}]
     for h in messages[:-1]:
