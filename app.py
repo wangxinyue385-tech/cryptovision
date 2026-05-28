@@ -174,7 +174,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #
   </div>
 </div>
 <script>
-var history = [];
+var chatHistory = [];
 var busy = false;
 
 function setBusy(v) {
@@ -213,24 +213,24 @@ function doSend(text) {
   if (!msg) return;
   inp.value = '';
   addUserMsg(msg);
-  history.push({role:'user', content:msg});
+  chatHistory.push({role:'user', content:msg});
   setBusy(true);
   var typing = addTyping();
   fetch('/chat', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({messages: history})
+    body: JSON.stringify({messages: chatHistory})
   }).then(function(r) { return r.json(); }).then(function(data) {
     typing.remove();
     if (data.type === 'chart') { addChart(data); }
     else if (data.type === 'table') { addTable(data); }
     else { addAIMsg(data.reply); }
-    history.push({role:'assistant', content: data.reply || data.summary || ''});
+    chatHistory.push({role:'assistant', content: data.reply || data.summary || ''});
     setBusy(false);
   }).catch(function() {
     typing.remove();
     addAIMsg('Network error, please retry.');
-    history.pop();
+    chatHistory.pop();
     setBusy(false);
   });
 }
